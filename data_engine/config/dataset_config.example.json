@@ -1,0 +1,29 @@
+{
+  "pipeline_version": "v2-alpha",
+  "seed": 1234,
+  "convention": {
+    "units": "meters",
+    "camera_frame": "right_handed"
+  },
+  "splits": {
+    "train": 50000,
+    "val": 5000
+  },
+  "domains": {
+    "use_superquadrics": true,
+    "use_stl_pool": true,
+    "use_real_background_composites": true
+  },
+  "placement": {
+    "min_plane_distance_m": 0.03,
+    "max_plane_distance_m": 0.5,
+    "require_center_in_fov": true,
+    "require_camera_outside_bbox": true
+  },
+  "artifacts": {
+    "enabled": true,
+    "hole_probability": 0.01,
+    "edge_noise_std_m": 0.002,
+    "quantization_step_m": 0.001
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "camera": {
+    "resolution": {
+      "width": 640,
+      "height": 480
+    },
+    "fov": {
+      "horizontal": 70.0,
+      "vertical": 55.0
+    }
+  },
+  "plane_fit": {
+    "stride": 2,
+    "ransac_threshold_m": 0.01,
+    "ransac_iterations": 300
+  },
+  "background_normalization": {
+    "enabled": true,
+    "distance_range_m": [1.8, 2.5],
+    "pitch_deg_range": [-20.0, 20.0],
+    "yaw_deg_range": [-20.0, 20.0],
+    "backproject_stride": 1,
+    "fill_fov": true,
+    "target_fill_ratio": 0.98,
+    "max_inplane_scale": 10.0,
+    "depth_splat_radius_px": 1
+  },
+  "placement": {
+    "min_plane_distance_m": 0.3,
+    "max_plane_distance_m": 1.5,
+    "max_tries": 400
+  },
+  "scene": {
+    "model": {
+      "length": 1.0,
+      "length_range": [0.8, 1.2],
+      "cross_section": {
+        "major_axis_range": [0.06, 0.12],
+        "minor_axis_range": [0.04, 0.08],
+        "min_aspect_ratio": 1.2
+      },
+      "taper_ratio_range": [1.0, 1.5],
+      "twist_angle_range": [25, 30],
+      "superquadric": {
+        "epsilon_1_range": [0.5, 2.0],
+        "epsilon_2_range": [0.5, 2.0]
+      },
+      "resolution": 50,
+      "sample_points": 5000
+    }
+  }
+}

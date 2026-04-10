@@ -1,0 +1,16 @@
+{
+  "camera": {
+    "backend": "realsense",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "enable_color": false
+  },
+  "capture": {
+    "output_root": "data/backgrounds/raw",
+    "session_name": null,
+    "max_frames": 0,
+    "preview_max_depth_m": 5.0,
+    "save_preview_png": true
+  }
+}
