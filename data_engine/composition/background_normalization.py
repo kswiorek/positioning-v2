@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from data_engine.composition.plane_fit import PlaneModel, select_plane_support_mask
+from data_engine.composition.plane_fit import select_plane_support_mask
 from data_engine.geometry import intrinsics_from_camera_config
 
 
@@ -174,7 +174,6 @@ def _bilinear_sample(image: np.ndarray, x: np.ndarray, y: np.ndarray, fill_value
 def normalize_and_randomize_background_depth(
     depth_m: np.ndarray,
     camera_cfg: dict,
-    fitted_plane: PlaneModel,
     rng: np.random.Generator,
     distance_range_m: tuple[float, float],
     pitch_deg_range: tuple[float, float],
@@ -184,7 +183,6 @@ def normalize_and_randomize_background_depth(
     max_inplane_scale: float = 3.0,
     middle_percentile: float = 0.90,
     out_of_plane_range_m: tuple[float, float] = (0.0, 0.2),
-    reference_plane_camera_normal: bool = False,
 ) -> tuple[np.ndarray, BackgroundTransformParams]:
     """Normalize captured background to canonical plane, then randomize pose.
 
@@ -206,21 +204,15 @@ def normalize_and_randomize_background_depth(
     y = (vv - cy) * z / fy
     points_cam = np.stack([x, y, z], axis=-1)
 
-    # Canonical normalization: plane -> z=0, normal -> +Z.
-    if reference_plane_camera_normal:
-        # Force fronto-parallel reference plane and fit only depth offset from support region.
-        n = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-        support = select_plane_support_mask(depth, middle_percentile=middle_percentile)
-        if np.any(support):
-            z_ref = float(np.median(depth[support]))
-        else:
-            z_ref = float(np.median(depth[valid_depth]))
-        z_ref = max(z_ref, 1e-3)
-        plane_offset = z_ref
+    # Canonical normalization: fixed fronto-parallel reference plane.
+    n = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+    support = select_plane_support_mask(depth, middle_percentile=middle_percentile)
+    if np.any(support):
+        z_ref = float(np.median(depth[support]))
     else:
-        n = np.asarray(fitted_plane.normal, dtype=np.float64)
-        n = n / max(np.linalg.norm(n), 1e-12)
-        plane_offset = float(fitted_plane.offset)
+        z_ref = float(np.median(depth[valid_depth]))
+    z_ref = max(z_ref, 1e-3)
+    plane_offset = z_ref
 
     p0 = -plane_offset * n
 
@@ -353,7 +345,9 @@ def normalize_and_randomize_background_depth(
     base_depth = p_cam[..., 2]
     depth_rand = np.zeros((height, width), dtype=np.float32)
     out_valid = valid_ray & src_valid
-    depth_rand[out_valid] = (base_depth[out_valid] + disp[out_valid] * n_rand[2]).astype(np.float32)
+    # Residual/displacement texture encodes local protrusions relative to the source plane;
+    # apply with opposite sign in camera depth so near-foreground structures stay in front.
+    depth_rand[out_valid] = (base_depth[out_valid] - disp[out_valid] * n_rand[2]).astype(np.float32)
     depth_rand = np.maximum(depth_rand, 0.0)
 
     # Fill metrics after warp.

@@ -15,7 +15,6 @@
   },
   "background_normalization": {
     "enabled": true,
-    "reference_plane_camera_normal": true,
     "distance_range_m": [1.8, 2.5],
     "pitch_deg_range": [-20.0, 20.0],
     "yaw_deg_range": [-20.0, 20.0],

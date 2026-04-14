@@ -41,23 +41,13 @@ def main() -> None:
     background_depth_raw = depth_data["depth_m"].astype(np.float32)
 
     plane_cfg = scene_cfg.get("plane_fit", {})
-    plane_raw = fit_plane_from_depth(
-        depth_m=background_depth_raw,
-        camera_cfg=scene_cfg["camera"],
-        stride=int(plane_cfg.get("stride", 2)),
-        middle_percentile=float(plane_cfg.get("middle_percentile", 0.90)),
-        seed=args.seed,
-    )
-
     bg_norm_cfg = scene_cfg.get("background_normalization", {})
     norm_enabled = bool(bg_norm_cfg.get("enabled", True))
-    ref_plane_camera_normal = bool(bg_norm_cfg.get("reference_plane_camera_normal", True))
     bg_transform = None
     if norm_enabled:
         background_depth, bg_transform = normalize_and_randomize_background_depth(
             depth_m=background_depth_raw,
             camera_cfg=scene_cfg["camera"],
-            fitted_plane=plane_raw,
             rng=np.random.default_rng(args.seed),
             distance_range_m=tuple(bg_norm_cfg.get("distance_range_m", [1.8, 2.5])),
             pitch_deg_range=tuple(bg_norm_cfg.get("pitch_deg_range", [-20.0, 20.0])),
@@ -67,7 +57,6 @@ def main() -> None:
             max_inplane_scale=float(bg_norm_cfg.get("max_inplane_scale", 3.0)),
             middle_percentile=float(bg_norm_cfg.get("middle_percentile", 0.90)),
             out_of_plane_range_m=tuple(bg_norm_cfg.get("out_of_plane_range_m", [0.0, 0.2])),
-            reference_plane_camera_normal=ref_plane_camera_normal,
         )
     else:
         background_depth = background_depth_raw
@@ -127,14 +116,8 @@ def main() -> None:
             "offset": float(plane.offset),
             "inlier_ratio": float(plane.inlier_ratio),
         },
-        "plane_raw": {
-            "normal": plane_raw.normal.tolist(),
-            "offset": float(plane_raw.offset),
-            "inlier_ratio": float(plane_raw.inlier_ratio),
-        },
         "background_normalization": {
             "enabled": norm_enabled,
-            "reference_plane_camera_normal": ref_plane_camera_normal,
             "transform": {
                 "pitch_deg": None if bg_transform is None else float(bg_transform.pitch_deg),
                 "yaw_deg": None if bg_transform is None else float(bg_transform.yaw_deg),
