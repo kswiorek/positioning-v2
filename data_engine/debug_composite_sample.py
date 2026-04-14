@@ -45,8 +45,7 @@ def main() -> None:
         depth_m=background_depth_raw,
         camera_cfg=scene_cfg["camera"],
         stride=int(plane_cfg.get("stride", 2)),
-        threshold_m=float(plane_cfg.get("ransac_threshold_m", 0.01)),
-        max_iterations=int(plane_cfg.get("ransac_iterations", 300)),
+        middle_percentile=float(plane_cfg.get("middle_percentile", 0.90)),
         seed=args.seed,
     )
 
@@ -62,11 +61,11 @@ def main() -> None:
             distance_range_m=tuple(bg_norm_cfg.get("distance_range_m", [1.8, 2.5])),
             pitch_deg_range=tuple(bg_norm_cfg.get("pitch_deg_range", [-20.0, 20.0])),
             yaw_deg_range=tuple(bg_norm_cfg.get("yaw_deg_range", [-20.0, 20.0])),
-            backproject_stride=int(bg_norm_cfg.get("backproject_stride", 1)),
             fill_fov=bool(bg_norm_cfg.get("fill_fov", True)),
             target_fill_ratio=float(bg_norm_cfg.get("target_fill_ratio", 0.98)),
             max_inplane_scale=float(bg_norm_cfg.get("max_inplane_scale", 3.0)),
-            depth_splat_radius_px=int(bg_norm_cfg.get("depth_splat_radius_px", 1)),
+            middle_percentile=float(bg_norm_cfg.get("middle_percentile", 0.90)),
+            out_of_plane_range_m=tuple(bg_norm_cfg.get("out_of_plane_range_m", [0.0, 0.2])),
         )
     else:
         background_depth = background_depth_raw
@@ -76,8 +75,7 @@ def main() -> None:
         depth_m=background_depth,
         camera_cfg=scene_cfg["camera"],
         stride=int(plane_cfg.get("stride", 2)),
-        threshold_m=float(plane_cfg.get("ransac_threshold_m", 0.01)),
-        max_iterations=int(plane_cfg.get("ransac_iterations", 300)),
+        middle_percentile=float(plane_cfg.get("middle_percentile", 0.90)),
         seed=args.seed,
     )
 
@@ -141,6 +139,7 @@ def main() -> None:
                 "inplane_scale_xy": None if bg_transform is None else float(bg_transform.inplane_scale_xy),
                 "projected_fill_u": None if bg_transform is None else float(bg_transform.projected_fill_u),
                 "projected_fill_v": None if bg_transform is None else float(bg_transform.projected_fill_v),
+                "out_of_plane_scale_m": None if bg_transform is None else float(bg_transform.out_of_plane_scale_m),
             },
         },
         "shape_params": shape_params,

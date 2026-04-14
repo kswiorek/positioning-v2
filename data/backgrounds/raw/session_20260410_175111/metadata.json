@@ -1,0 +1,45 @@
+{
+  "session_name": "session_20260410_175111",
+  "started_unix_s": 1775836274.9869523,
+  "capture_config": {
+    "output_root": "data\\backgrounds\\raw",
+    "session_name": null,
+    "max_frames": 0,
+    "preview_max_depth_m": 5.0,
+    "save_preview_png": true
+  },
+  "camera": {
+    "backend": "realsense",
+    "width": 320,
+    "height": 240,
+    "fps": 30,
+    "enable_color": false,
+    "depth_scale_m": 0.0002500000118743628,
+    "intrinsics": {
+      "fx": 228.609375,
+      "fy": 228.66015625,
+      "cx": 169.25390625,
+      "cy": 123.9697265625,
+      "width": 320,
+      "height": 240
+    }
+  },
+  "frames": [
+    {
+      "frame_index": 0,
+      "frame_name": "frame_000000",
+      "timestamp_s": 11.673768,
+      "depth_file": "depth\\frame_000000.npz",
+      "preview_file": "preview\\frame_000000.png"
+    },
+    {
+      "frame_index": 1,
+      "frame_name": "frame_000001",
+      "timestamp_s": 22.327807,
+      "depth_file": "depth\\frame_000001.npz",
+      "preview_file": "preview\\frame_000001.png"
+    }
+  ],
+  "ended_unix_s": 1775836299.4281256,
+  "num_saved_frames": 2
+}

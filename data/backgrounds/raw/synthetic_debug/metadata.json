@@ -1,6 +1,6 @@
 {
   "session_name": "synthetic_debug",
-  "started_unix_s": 1775815185.8257442,
+  "started_unix_s": 1775829834.4520993,
   "capture_config": {
     "output_root": "data\\backgrounds\\raw",
     "session_name": "synthetic_debug",
@@ -15,13 +15,13 @@
     "fps": 20,
     "seed": 1234,
     "base_depth_m": 2.0,
-    "amplitude_m": 0.8,
+    "amplitude_m": 0.18,
     "noise_scale": 2.8,
     "octaves": 4,
     "temporal_speed": 0.4,
     "dropout_prob": 0.01
   },
   "frames": [],
-  "ended_unix_s": 1775815210.0448582,
+  "ended_unix_s": 1775829842.7648518,
   "num_saved_frames": 0
 }

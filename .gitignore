@@ -1,0 +1,4 @@
+*.pyc
+librealsense-2.53.1/*
+**/__pycache__/
+data/debug/*

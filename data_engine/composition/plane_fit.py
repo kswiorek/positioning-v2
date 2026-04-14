@@ -87,13 +87,58 @@ def fit_plane_from_depth(
     threshold_m: float = 0.01,
     max_iterations: int = 300,
     seed: int = 0,
+    middle_percentile: float = 0.90,
 ) -> PlaneModel:
-    """Fit dominant background plane from depth image and camera config."""
+    """Fit dominant background plane using a trimmed robust estimator.
+
+    RANSAC parameters are kept in the signature for backward compatibility,
+    but the default path uses percentile trimming + SVD plane fit.
+    """
     fx, fy, cx, cy, _, _ = intrinsics_from_camera_config(camera_cfg)
     points = depth_to_camera_points(depth_m, fx, fy, cx, cy, stride=stride)
-    return fit_plane_ransac(
-        points=points,
-        threshold_m=threshold_m,
-        max_iterations=max_iterations,
-        seed=seed,
-    )
+
+    # Fallback for sparse/invalid frames: fronto-parallel plane at median depth.
+    if points.shape[0] < 3:
+        valid_depth = np.asarray(depth_m, dtype=np.float64)
+        valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 1e-6)]
+        if valid_depth.size == 0:
+            # Safe default if frame has no valid depth at all.
+            return PlaneModel(
+                normal=np.array([0.0, 0.0, -1.0], dtype=np.float64),
+                offset=1.5,
+                inlier_ratio=0.0,
+            )
+
+        z_med = float(np.median(valid_depth))
+        return PlaneModel(
+            normal=np.array([0.0, 0.0, -1.0], dtype=np.float64),
+            offset=z_med,
+            inlier_ratio=1.0,
+        )
+
+    mid = np.clip(float(middle_percentile), 0.1, 0.999)
+    lo_p = 50.0 * (1.0 - mid)
+    hi_p = 100.0 - lo_p
+
+    z = points[:, 2]
+    z_lo = float(np.percentile(z, lo_p))
+    z_hi = float(np.percentile(z, hi_p))
+    keep = (z >= z_lo) & (z <= z_hi)
+    trimmed = points[keep]
+    if trimmed.shape[0] < 3:
+        trimmed = points
+
+    centroid = trimmed.mean(axis=0)
+    centered = trimmed - centroid
+    _, _, vh = np.linalg.svd(centered, full_matrices=False)
+    n = vh[-1]
+    n = n / max(np.linalg.norm(n), 1e-12)
+
+    # Orient normal to face camera (origin).
+    to_camera = -centroid
+    if float(np.dot(n, to_camera)) < 0.0:
+        n = -n
+
+    d = -float(np.dot(n, centroid))
+    inlier_ratio = float(trimmed.shape[0]) / float(points.shape[0])
+    return PlaneModel(normal=n.astype(np.float64), offset=d, inlier_ratio=inlier_ratio)

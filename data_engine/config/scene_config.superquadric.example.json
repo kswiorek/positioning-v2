@@ -1,8 +1,8 @@
 {
   "camera": {
     "resolution": {
-      "width": 640,
-      "height": 480
+      "width": 320,
+      "height": 240
     },
     "fov": {
       "horizontal": 70.0,
@@ -11,19 +11,18 @@
   },
   "plane_fit": {
     "stride": 2,
-    "ransac_threshold_m": 0.01,
-    "ransac_iterations": 300
+    "middle_percentile": 0.8
   },
   "background_normalization": {
     "enabled": true,
     "distance_range_m": [1.8, 2.5],
     "pitch_deg_range": [-20.0, 20.0],
     "yaw_deg_range": [-20.0, 20.0],
-    "backproject_stride": 1,
-    "fill_fov": true,
+    "fill_fov": false,
     "target_fill_ratio": 0.98,
-    "max_inplane_scale": 10.0,
-    "depth_splat_radius_px": 1
+    "max_inplane_scale": 1.0,
+    "middle_percentile": 0.5,
+    "out_of_plane_range_m": [0.0, 0.5]
   },
   "placement": {
     "min_plane_distance_m": 0.3,
