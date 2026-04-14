@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from data_engine.composition.background_normalization import normalize_and_randomize_background_depth
+from data_engine.composition.camera_artifacts import apply_camera_artifacts
 from data_engine.composition.depth_compositor import compose_depth, render_mesh_depth, transform_mesh
 from data_engine.composition.plane_fit import fit_plane_from_depth
 from data_engine.composition.plane_placement import PlacementConstraints
@@ -30,13 +31,22 @@ def main() -> None:
         default="data_engine/config/scene_config.superquadric.example.json",
         help="Path to scene config JSON",
     )
-    parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--out_npz", default="data/debug/composite_sample_000000.npz")
     parser.add_argument("--out_json", default="data/debug/composite_sample_000000.json")
     parser.add_argument("--no_vis", action="store_true", help="Disable Open3D visualization windows")
     args = parser.parse_args()
 
     scene_cfg = load_json(Path(args.scene_config))
+    seed_cfg = scene_cfg.get("seed", None)
+    if seed_cfg is None:
+        seed = int(np.random.SeedSequence().entropy)
+        seed_source = "random"
+    else:
+        seed = int(seed_cfg)
+        seed_source = "config"
+
+    rng_master = np.random.default_rng(seed)
+
     depth_data = np.load(args.depth_npz)
     background_depth_raw = depth_data["depth_m"].astype(np.float32)
 
@@ -45,10 +55,11 @@ def main() -> None:
     norm_enabled = bool(bg_norm_cfg.get("enabled", True))
     bg_transform = None
     if norm_enabled:
+        bg_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))
         background_depth, bg_transform = normalize_and_randomize_background_depth(
             depth_m=background_depth_raw,
             camera_cfg=scene_cfg["camera"],
-            rng=np.random.default_rng(args.seed),
+            rng=bg_rng,
             distance_range_m=tuple(bg_norm_cfg.get("distance_range_m", [1.8, 2.5])),
             pitch_deg_range=tuple(bg_norm_cfg.get("pitch_deg_range", [-20.0, 20.0])),
             yaw_deg_range=tuple(bg_norm_cfg.get("yaw_deg_range", [-20.0, 20.0])),
@@ -67,11 +78,12 @@ def main() -> None:
         camera_cfg=scene_cfg["camera"],
         stride=int(plane_cfg.get("stride", 2)),
         middle_percentile=float(plane_cfg.get("middle_percentile", 0.90)),
-        seed=args.seed,
+        seed=int(rng_master.integers(0, 2**31 - 1)),
     )
 
+    shape_seed = int(rng_master.integers(0, 2**31 - 1))
     canonical_mesh, _, bbox_corners, shape_params = generate_superquadric_canonical_model(
-        scene_cfg, seed=args.seed
+        scene_cfg, seed=shape_seed
     )
     bbox_extent = (bbox_corners.max(axis=0) - bbox_corners.min(axis=0)).astype(np.float64)
 
@@ -81,12 +93,13 @@ def main() -> None:
         max_plane_distance_m=float(place_cfg["max_plane_distance_m"]),
     )
 
+    place_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))
     placement = sample_pose_on_plane(
         plane=plane,
         camera_cfg=scene_cfg["camera"],
         bbox_extent_m=bbox_extent,
         constraints=constraints,
-        rng=np.random.default_rng(args.seed),
+        rng=place_rng,
         max_tries=int(place_cfg.get("max_tries", 400)),
     )
 
@@ -99,6 +112,15 @@ def main() -> None:
     object_depth = render_mesh_depth(mesh_world, scene_cfg["camera"])
     composite_depth = compose_depth(background_depth, object_depth)
 
+    camera_artifacts_cfg = scene_cfg.get("camera_artifacts", {})
+    composite_depth, artifact_stats = apply_camera_artifacts(
+        composite_depth,
+        camera_artifacts_cfg,
+        background_depth_m=background_depth,
+        object_depth_m=object_depth,
+        camera_cfg=scene_cfg["camera"],
+    )
+
     out_npz = Path(args.out_npz)
     out_npz.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -110,7 +132,8 @@ def main() -> None:
     )
 
     result = {
-        "seed": args.seed,
+        "seed": seed,
+        "seed_source": seed_source,
         "plane": {
             "normal": plane.normal.tolist(),
             "offset": float(plane.offset),
@@ -128,6 +151,7 @@ def main() -> None:
                 "out_of_plane_scale_m": None if bg_transform is None else float(bg_transform.out_of_plane_scale_m),
             },
         },
+        "camera_artifacts": artifact_stats,
         "shape_params": shape_params,
         "bbox_extent_m": bbox_extent.tolist(),
         "placement": {

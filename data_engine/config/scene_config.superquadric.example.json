@@ -1,4 +1,5 @@
 {
+  "seed": null,
   "camera": {
     "resolution": {
       "width": 320,
@@ -23,6 +24,29 @@
     "max_inplane_scale": 3.0,
     "middle_percentile": 0.5,
     "out_of_plane_range_m": [0.0, 0.5]
+  },
+  "camera_artifacts": {
+    "enabled": true,
+    "apply_to_background": false,
+    "edge_border": {
+      "enabled": true,
+      "interaction_radius_px": 2,
+      "min_depth_m": 1e-6,
+      "abs_threshold_m": 0.07,
+      "rel_threshold": 0.05,
+      "threshold_mode": "or",
+      "border_radius_px": 1,
+      "connectivity": 8
+    },
+    "normal_angle_blank": {
+      "enabled": true,
+      "angle_threshold_deg": 70.0,
+      "use_abs_dot": true,
+      "interaction_radius_px": 2,
+      "dilation_radius_px": 1,
+      "min_depth_m": 1e-6,
+      "connectivity": 8
+    }
   },
   "placement": {
     "min_plane_distance_m": 0.3,
