@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from data_engine.composition.plane_fit import PlaneModel
+from data_engine.composition.plane_fit import PlaneModel, select_plane_support_mask
 from data_engine.geometry import intrinsics_from_camera_config
 
 
@@ -184,6 +184,7 @@ def normalize_and_randomize_background_depth(
     max_inplane_scale: float = 3.0,
     middle_percentile: float = 0.90,
     out_of_plane_range_m: tuple[float, float] = (0.0, 0.2),
+    reference_plane_camera_normal: bool = False,
 ) -> tuple[np.ndarray, BackgroundTransformParams]:
     """Normalize captured background to canonical plane, then randomize pose.
 
@@ -206,9 +207,22 @@ def normalize_and_randomize_background_depth(
     points_cam = np.stack([x, y, z], axis=-1)
 
     # Canonical normalization: plane -> z=0, normal -> +Z.
-    n = np.asarray(fitted_plane.normal, dtype=np.float64)
-    n = n / max(np.linalg.norm(n), 1e-12)
-    p0 = -float(fitted_plane.offset) * n
+    if reference_plane_camera_normal:
+        # Force fronto-parallel reference plane and fit only depth offset from support region.
+        n = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+        support = select_plane_support_mask(depth, middle_percentile=middle_percentile)
+        if np.any(support):
+            z_ref = float(np.median(depth[support]))
+        else:
+            z_ref = float(np.median(depth[valid_depth]))
+        z_ref = max(z_ref, 1e-3)
+        plane_offset = z_ref
+    else:
+        n = np.asarray(fitted_plane.normal, dtype=np.float64)
+        n = n / max(np.linalg.norm(n), 1e-12)
+        plane_offset = float(fitted_plane.offset)
+
+    p0 = -plane_offset * n
 
     r_align = _rotation_align_vectors(n, np.array([0.0, 0.0, 1.0], dtype=np.float64))
 
@@ -219,7 +233,7 @@ def normalize_and_randomize_background_depth(
         points_cam[..., 0][valid_depth] * n[0]
         + points_cam[..., 1][valid_depth] * n[1]
         + points_cam[..., 2][valid_depth] * n[2]
-        + float(fitted_plane.offset)
+        + plane_offset
     )
 
     vals = residual[valid_depth]
@@ -241,20 +255,38 @@ def normalize_and_randomize_background_depth(
     displacement_tex = residual_norm * out_of_plane_scale_m
     displacement_tex = np.nan_to_num(displacement_tex, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # Build raw-plane canonical rectangle from frustum corners of the raw fitted plane.
-    corners_raw = _frustum_corners_on_raw_plane(camera_cfg, n, float(fitted_plane.offset))
-    if corners_raw is not None:
-        corners_src_norm = (r_align @ (corners_raw - p0).T).T
-        src_min = np.min(corners_src_norm[:, :2], axis=0)
-        src_max = np.max(corners_src_norm[:, :2], axis=0)
-    else:
-        # Fallback: derive source rectangle from valid raw-plane points.
-        pts_valid = points_cam[valid_depth]
-        if pts_valid.shape[0] < 3:
-            raise RuntimeError("Could not derive source rectangle from depth frame.")
-        pts_valid_norm = (r_align @ (pts_valid - p0).T).T
-        src_min = np.min(pts_valid_norm[:, :2], axis=0)
-        src_max = np.max(pts_valid_norm[:, :2], axis=0)
+    # Build source rectangle in canonical plane frame.
+    # For fill_fov, use valid depth footprint so scaling compensates sparse/partial captures.
+    pts_valid = points_cam[valid_depth]
+    if pts_valid.shape[0] < 3:
+        raise RuntimeError("Could not derive source rectangle from depth frame.")
+    pts_valid_norm = (r_align @ (pts_valid - p0).T).T
+
+    corners_raw = _frustum_corners_on_raw_plane(camera_cfg, n, plane_offset)
+    src_min = None
+    src_max = None
+
+    if fill_fov:
+        # Robust footprint from valid points; trim outliers at image borders.
+        px = pts_valid_norm[:, 0]
+        py = pts_valid_norm[:, 1]
+        src_min = np.array([
+            float(np.percentile(px, 1.0)),
+            float(np.percentile(py, 1.0)),
+        ])
+        src_max = np.array([
+            float(np.percentile(px, 99.0)),
+            float(np.percentile(py, 99.0)),
+        ])
+
+    if src_min is None or src_max is None:
+        if corners_raw is not None:
+            corners_src_norm = (r_align @ (corners_raw - p0).T).T
+            src_min = np.min(corners_src_norm[:, :2], axis=0)
+            src_max = np.max(corners_src_norm[:, :2], axis=0)
+        else:
+            src_min = np.min(pts_valid_norm[:, :2], axis=0)
+            src_max = np.max(pts_valid_norm[:, :2], axis=0)
 
     src_center = 0.5 * (src_min + src_max)
     src_half = 0.5 * (src_max - src_min)

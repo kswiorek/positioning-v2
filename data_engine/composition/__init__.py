@@ -5,7 +5,7 @@ from .background_normalization import (
     normalize_and_randomize_background_depth,
 )
 from .depth_compositor import compose_depth, render_mesh_depth, transform_mesh
-from .plane_fit import PlaneModel, fit_plane_from_depth, fit_plane_ransac
+from .plane_fit import PlaneModel, fit_plane_from_depth, select_plane_support_mask
 from .plane_placement import (
     PlacementConstraints,
     center_projects_inside_fov,
@@ -22,7 +22,7 @@ __all__ = [
     "render_mesh_depth",
     "transform_mesh",
     "fit_plane_from_depth",
-    "fit_plane_ransac",
+    "select_plane_support_mask",
     "PlacementConstraints",
     "PlacementSample",
     "center_projects_inside_fov",

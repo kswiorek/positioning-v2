@@ -1,0 +1,17 @@
+{
+  "camera": {
+    "resolution": {
+      "width": 320,
+      "height": 240
+    },
+    "fov": {
+      "horizontal": 70.0,
+      "vertical": 55.0
+    }
+  },
+  "plane_fit": {
+    "stride": 2,
+    "middle_percentile": 0.9,
+    "allow_tilt": true
+  }
+}

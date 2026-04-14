@@ -51,6 +51,7 @@ def main() -> None:
 
     bg_norm_cfg = scene_cfg.get("background_normalization", {})
     norm_enabled = bool(bg_norm_cfg.get("enabled", True))
+    ref_plane_camera_normal = bool(bg_norm_cfg.get("reference_plane_camera_normal", True))
     bg_transform = None
     if norm_enabled:
         background_depth, bg_transform = normalize_and_randomize_background_depth(
@@ -66,6 +67,7 @@ def main() -> None:
             max_inplane_scale=float(bg_norm_cfg.get("max_inplane_scale", 3.0)),
             middle_percentile=float(bg_norm_cfg.get("middle_percentile", 0.90)),
             out_of_plane_range_m=tuple(bg_norm_cfg.get("out_of_plane_range_m", [0.0, 0.2])),
+            reference_plane_camera_normal=ref_plane_camera_normal,
         )
     else:
         background_depth = background_depth_raw
@@ -132,6 +134,7 @@ def main() -> None:
         },
         "background_normalization": {
             "enabled": norm_enabled,
+            "reference_plane_camera_normal": ref_plane_camera_normal,
             "transform": {
                 "pitch_deg": None if bg_transform is None else float(bg_transform.pitch_deg),
                 "yaw_deg": None if bg_transform is None else float(bg_transform.yaw_deg),

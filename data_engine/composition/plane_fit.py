@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 
 import numpy as np
 
-from data_engine.geometry.camera import depth_to_camera_points, intrinsics_from_camera_config
+from data_engine.geometry.camera import intrinsics_from_camera_config
 
 
 @dataclass
@@ -18,127 +19,124 @@ class PlaneModel:
     inlier_ratio: float
 
 
-def _fit_plane_from_three_points(points: np.ndarray) -> tuple[np.ndarray, float] | tuple[None, None]:
-    p0, p1, p2 = points
-    v1 = p1 - p0
-    v2 = p2 - p0
-    n = np.cross(v1, v2)
-    norm = np.linalg.norm(n)
-    if norm < 1e-9:
-        return None, None
-    n = n / norm
-    d = -float(np.dot(n, p0))
-    return n, d
+def select_plane_support_mask(depth_m: np.ndarray, middle_percentile: float = 0.90) -> np.ndarray:
+    """Select robust far-depth support mask for plane estimation."""
+    depth = np.asarray(depth_m, dtype=np.float64)
+    valid = np.isfinite(depth) & (depth > 1e-6)
+    valid_depth = depth[valid]
+    if valid_depth.size == 0:
+        return np.zeros_like(valid, dtype=bool)
+
+    mid = np.clip(float(middle_percentile), 0.5, 0.98)
+    p_low = 100.0 * mid
+    z_low = float(np.percentile(valid_depth, p_low))
+    z_high = float(np.percentile(valid_depth, 99.0))
+    far_band = valid & (depth >= z_low) & (depth <= z_high)
+
+    if not np.any(far_band):
+        return np.zeros_like(valid, dtype=bool)
+
+    return _largest_connected_component(far_band)
 
 
-def fit_plane_ransac(
-    points: np.ndarray,
-    threshold_m: float = 0.01,
-    max_iterations: int = 300,
-    seed: int = 0,
-) -> PlaneModel:
-    """Robust plane fit using a simple RANSAC loop."""
-    if points.shape[0] < 3:
-        raise ValueError("Need at least 3 points for plane fitting.")
+def _largest_connected_component(mask: np.ndarray) -> np.ndarray:
+    """Return mask of the largest 8-connected component."""
+    h, w = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    best_pixels: list[tuple[int, int]] = []
 
-    rng = np.random.default_rng(seed)
-    best_inliers = None
-    best_n = None
-    best_d = None
+    neighbors = [
+        (-1, -1), (-1, 0), (-1, 1),
+        (0, -1),           (0, 1),
+        (1, -1),  (1, 0),  (1, 1),
+    ]
 
-    for _ in range(max_iterations):
-        idx = rng.choice(points.shape[0], size=3, replace=False)
-        n, d = _fit_plane_from_three_points(points[idx])
-        if n is None:
+    ys, xs = np.where(mask)
+    for y0, x0 in zip(ys, xs):
+        if visited[y0, x0]:
             continue
 
-        dist = np.abs(points @ n + d)
-        inliers = dist < threshold_m
-        if best_inliers is None or inliers.sum() > best_inliers.sum():
-            best_inliers = inliers
-            best_n = n
-            best_d = d
+        q = deque([(int(y0), int(x0))])
+        visited[y0, x0] = True
+        component: list[tuple[int, int]] = []
 
-    if best_inliers is None or best_inliers.sum() < 3:
-        raise RuntimeError("RANSAC failed to find a valid plane.")
+        while q:
+            y, x = q.popleft()
+            component.append((y, x))
+            for dy, dx in neighbors:
+                ny, nx = y + dy, x + dx
+                if ny < 0 or ny >= h or nx < 0 or nx >= w:
+                    continue
+                if visited[ny, nx] or not mask[ny, nx]:
+                    continue
+                visited[ny, nx] = True
+                q.append((ny, nx))
 
-    # Refine with SVD on inliers.
-    inlier_pts = points[best_inliers]
-    centroid = inlier_pts.mean(axis=0)
-    centered = inlier_pts - centroid
-    _, _, vh = np.linalg.svd(centered, full_matrices=False)
-    n = vh[-1]
-    n = n / np.linalg.norm(n)
+        if len(component) > len(best_pixels):
+            best_pixels = component
 
-    # Orient normal to face the camera (origin).
-    to_camera = -centroid
-    if float(np.dot(n, to_camera)) < 0.0:
-        n = -n
-
-    d = -float(np.dot(n, centroid))
-    inlier_ratio = float(best_inliers.mean())
-    return PlaneModel(normal=n.astype(np.float64), offset=d, inlier_ratio=inlier_ratio)
+    out = np.zeros_like(mask, dtype=bool)
+    for y, x in best_pixels:
+        out[y, x] = True
+    return out
 
 
 def fit_plane_from_depth(
     depth_m: np.ndarray,
     camera_cfg: dict,
     stride: int = 2,
-    threshold_m: float = 0.01,
-    max_iterations: int = 300,
     seed: int = 0,
     middle_percentile: float = 0.90,
+    allow_tilt: bool = True,
 ) -> PlaneModel:
-    """Fit dominant background plane using a trimmed robust estimator.
+    """Fit a frontal reference plane using far-depth connected-component heuristics.
 
-    RANSAC parameters are kept in the signature for backward compatibility,
-    but the default path uses percentile trimming + SVD plane fit.
+    The plane normal is fixed to camera axis (0, 0, -1), and depth is estimated
+    robustly from the far-depth band and its largest connected component.
     """
+    _ = seed  # deterministic heuristic, seed kept for compatibility
+    _ = stride  # full-resolution mask-based estimation is used
     fx, fy, cx, cy, _, _ = intrinsics_from_camera_config(camera_cfg)
-    points = depth_to_camera_points(depth_m, fx, fy, cx, cy, stride=stride)
 
-    # Fallback for sparse/invalid frames: fronto-parallel plane at median depth.
-    if points.shape[0] < 3:
-        valid_depth = np.asarray(depth_m, dtype=np.float64)
-        valid_depth = valid_depth[np.isfinite(valid_depth) & (valid_depth > 1e-6)]
-        if valid_depth.size == 0:
-            # Safe default if frame has no valid depth at all.
-            return PlaneModel(
-                normal=np.array([0.0, 0.0, -1.0], dtype=np.float64),
-                offset=1.5,
-                inlier_ratio=0.0,
-            )
+    depth = np.asarray(depth_m, dtype=np.float64)
+    valid = np.isfinite(depth) & (depth > 1e-6)
+    valid_depth = depth[valid]
 
-        z_med = float(np.median(valid_depth))
-        return PlaneModel(
-            normal=np.array([0.0, 0.0, -1.0], dtype=np.float64),
-            offset=z_med,
-            inlier_ratio=1.0,
-        )
+    frontal_normal = np.array([0.0, 0.0, -1.0], dtype=np.float64)
 
-    mid = np.clip(float(middle_percentile), 0.1, 0.999)
-    lo_p = 50.0 * (1.0 - mid)
-    hi_p = 100.0 - lo_p
+    if valid_depth.size == 0:
+        return PlaneModel(normal=frontal_normal, offset=1.5, inlier_ratio=0.0)
 
-    z = points[:, 2]
-    z_lo = float(np.percentile(z, lo_p))
-    z_hi = float(np.percentile(z, hi_p))
-    keep = (z >= z_lo) & (z <= z_hi)
-    trimmed = points[keep]
-    if trimmed.shape[0] < 3:
-        trimmed = points
+    support = select_plane_support_mask(depth, middle_percentile=middle_percentile)
+    if not np.any(support):
+        z_ref = float(np.percentile(valid_depth, 90.0))
+        return PlaneModel(normal=frontal_normal, offset=z_ref, inlier_ratio=0.0)
 
-    centroid = trimmed.mean(axis=0)
-    centered = trimmed - centroid
+    yy, xx = np.where(support)
+    z = depth[yy, xx]
+    x = (xx.astype(np.float64) - cx) * z / fx
+    y = (yy.astype(np.float64) - cy) * z / fy
+    pts = np.stack([x, y, z], axis=1)
+
+    inlier_ratio = float(np.count_nonzero(support)) / float(np.count_nonzero(valid))
+    if pts.shape[0] < 3:
+        z_ref = float(np.median(z)) if z.size > 0 else float(np.percentile(valid_depth, 90.0))
+        return PlaneModel(normal=frontal_normal, offset=z_ref, inlier_ratio=inlier_ratio)
+
+    if not allow_tilt:
+        z_ref = float(np.median(z))
+        return PlaneModel(normal=frontal_normal, offset=z_ref, inlier_ratio=inlier_ratio)
+
+    centroid = pts.mean(axis=0)
+    centered = pts - centroid
     _, _, vh = np.linalg.svd(centered, full_matrices=False)
     n = vh[-1]
     n = n / max(np.linalg.norm(n), 1e-12)
 
-    # Orient normal to face camera (origin).
+    # Orient normal toward camera.
     to_camera = -centroid
     if float(np.dot(n, to_camera)) < 0.0:
         n = -n
 
     d = -float(np.dot(n, centroid))
-    inlier_ratio = float(trimmed.shape[0]) / float(points.shape[0])
     return PlaneModel(normal=n.astype(np.float64), offset=d, inlier_ratio=inlier_ratio)
