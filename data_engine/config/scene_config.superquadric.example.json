@@ -1,5 +1,6 @@
 {
   "seed": null,
+
   "camera": {
     "resolution": {
       "width": 320,
@@ -10,24 +11,93 @@
       "vertical": 55.0
     }
   },
-  "plane_fit": {
-    "stride": 2,
-    "middle_percentile": 0.8
-  },
+
   "background_normalization": {
     "enabled": true,
-    "distance_range_m": [1.8, 2.5],
+    "distance_range_m": [1.5, 2.5],
     "pitch_deg_range": [-20.0, 20.0],
     "yaw_deg_range": [-20.0, 20.0],
     "fill_fov": true,
     "target_fill_ratio": 0.98,
     "max_inplane_scale": 3.0,
     "middle_percentile": 0.5,
-    "out_of_plane_range_m": [0.0, 0.5]
+    "out_of_plane_range_m": [0.0, 0.8]
   },
+
+  "plane_fit": {
+    "stride": 2,
+    "middle_percentile": 0.8
+  },
+
+  "scene": {
+    "source_selection": {
+      "mode": "random",
+      "weights": {
+        "superquadric": 0.5,
+        "stl": 0.5
+      }
+    },
+    "superquadric": {
+      "base_length_m": 1.0,
+      "length_scale_range": [0.8, 1.2],
+      "cross_section": {
+        "major_axis_range": [0.06, 0.12],
+        "minor_axis_range": [0.04, 0.08],
+        "min_aspect_ratio": 1.2
+      },
+      "taper_ratio_range": [1.0, 1.5],
+      "twist_angle_range_deg": [25, 30],
+      "exponents": {
+        "epsilon_1_range": [0.5, 2.0],
+        "epsilon_2_range": [0.5, 2.0]
+      },
+      "mesh_resolution": 50,
+      "point_sample_count": 5000
+    },
+    "stl": {
+      "input": {
+        "directory": "data/stl_processed",
+        "glob": "*.stl"
+      },
+      "normalization": {
+        "max_aabb_dimension_range_m": [0.3, 0.8]
+      },
+      "points": {
+        "sample_count": 5000
+      }
+    }
+  },
+
+  "placement": {
+    "min_plane_distance_m": 1.2,
+    "max_plane_distance_m": 1.6,
+    "max_attempts": 400
+  },
+
   "camera_artifacts": {
     "enabled": true,
     "apply_to_background": false,
+    "range_noise": {
+      "enabled": true,
+      "interaction_radius_px": 2,
+      "min_depth_m": 1e-6,
+      "sigma0_m": 0.0007,
+      "sigma_z2_m": 0.00045,
+      "sigma_min_m": 0.0005,
+      "sigma_max_m": 0.004,
+      "connectivity": 8
+    },
+    "depth_quantization": {
+      "enabled": true,
+      "interaction_radius_px": 2,
+      "min_depth_m": 1e-6,
+      "z_near_m": 0.25,
+      "z_far_m": 2.5,
+      "step_m_near": 0.00025,
+      "step_m_far": 0.001,
+      "dither_m": 0.00005,
+      "connectivity": 8
+    },
     "edge_border": {
       "enabled": true,
       "interaction_radius_px": 2,
@@ -38,38 +108,28 @@
       "border_radius_px": 1,
       "connectivity": 8
     },
+    "normal_confidence_falloff": {
+      "enabled": true,
+      "angle_center_deg": 70.0,
+      "angle_span_deg": 20.0,
+      "drop_prob_max": 0.75,
+      "structured_dropout": true,
+      "blob_sigma_px": 1.8,
+      "blob_gamma": 1.0,
+      "use_abs_dot": true,
+      "interaction_radius_px": 2,
+      "dilation_radius_px": 0,
+      "min_depth_m": 1e-6,
+      "connectivity": 8
+    },
     "normal_angle_blank": {
       "enabled": true,
-      "angle_threshold_deg": 70.0,
+      "angle_threshold_deg": 80.0,
       "use_abs_dot": true,
       "interaction_radius_px": 2,
       "dilation_radius_px": 1,
       "min_depth_m": 1e-6,
       "connectivity": 8
-    }
-  },
-  "placement": {
-    "min_plane_distance_m": 0.3,
-    "max_plane_distance_m": 1.5,
-    "max_tries": 400
-  },
-  "scene": {
-    "model": {
-      "length": 1.0,
-      "length_range": [0.8, 1.2],
-      "cross_section": {
-        "major_axis_range": [0.06, 0.12],
-        "minor_axis_range": [0.04, 0.08],
-        "min_aspect_ratio": 1.2
-      },
-      "taper_ratio_range": [1.0, 1.5],
-      "twist_angle_range": [25, 30],
-      "superquadric": {
-        "epsilon_1_range": [0.5, 2.0],
-        "epsilon_2_range": [0.5, 2.0]
-      },
-      "resolution": 50,
-      "sample_points": 5000
     }
   }
 }

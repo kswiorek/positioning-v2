@@ -14,7 +14,7 @@ from data_engine.composition.depth_compositor import compose_depth, render_mesh_
 from data_engine.composition.plane_fit import fit_plane_from_depth
 from data_engine.composition.plane_placement import PlacementConstraints
 from data_engine.composition.placement_sampling import sample_pose_on_plane
-from data_engine.generators import generate_superquadric_canonical_model
+from data_engine.generators import generate_mixed_canonical_model
 from data_engine.visualization import visualize_sample
 
 
@@ -30,6 +30,12 @@ def main() -> None:
         "--scene_config",
         default="data_engine/config/scene_config.superquadric.example.json",
         help="Path to scene config JSON",
+    )
+    parser.add_argument(
+        "--object_source",
+        choices=["superquadric", "stl", "random"],
+        default="superquadric",
+        help="Shape source override for debug runs.",
     )
     parser.add_argument("--out_npz", default="data/debug/composite_sample_000000.npz")
     parser.add_argument("--out_json", default="data/debug/composite_sample_000000.json")
@@ -81,9 +87,11 @@ def main() -> None:
         seed=int(rng_master.integers(0, 2**31 - 1)),
     )
 
-    shape_seed = int(rng_master.integers(0, 2**31 - 1))
-    canonical_mesh, _, bbox_corners, shape_params = generate_superquadric_canonical_model(
-        scene_cfg, seed=shape_seed
+    object_seed = int(rng_master.integers(0, 2**31 - 1))
+    canonical_mesh, _, bbox_corners, shape_params = generate_mixed_canonical_model(
+        scene_cfg,
+        seed=object_seed,
+        source_override=args.object_source,
     )
     bbox_extent = (bbox_corners.max(axis=0) - bbox_corners.min(axis=0)).astype(np.float64)
 
@@ -100,7 +108,7 @@ def main() -> None:
         bbox_extent_m=bbox_extent,
         constraints=constraints,
         rng=place_rng,
-        max_tries=int(place_cfg.get("max_tries", 400)),
+        max_tries=int(place_cfg.get("max_attempts", 400)),
     )
 
     mesh_world = transform_mesh(
@@ -113,12 +121,14 @@ def main() -> None:
     composite_depth = compose_depth(background_depth, object_depth)
 
     camera_artifacts_cfg = scene_cfg.get("camera_artifacts", {})
+    artifacts_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))
     composite_depth, artifact_stats = apply_camera_artifacts(
         composite_depth,
         camera_artifacts_cfg,
         background_depth_m=background_depth,
         object_depth_m=object_depth,
         camera_cfg=scene_cfg["camera"],
+        rng=artifacts_rng,
     )
 
     out_npz = Path(args.out_npz)
@@ -153,6 +163,7 @@ def main() -> None:
         },
         "camera_artifacts": artifact_stats,
         "shape_params": shape_params,
+        "object_source": shape_params.get("object_source", "unknown"),
         "bbox_extent_m": bbox_extent.tolist(),
         "placement": {
             "position_xyz": placement.position_xyz.tolist(),

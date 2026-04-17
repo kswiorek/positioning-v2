@@ -61,7 +61,7 @@ def main() -> None:
         bbox_extent_m=bbox_extent,
         constraints=constraints,
         rng=rng,
-        max_tries=int(place_cfg.get("max_tries", 400)),
+        max_tries=int(place_cfg.get("max_attempts", 400)),
     )
 
     result = {

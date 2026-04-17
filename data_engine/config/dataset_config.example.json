@@ -1,29 +1,18 @@
 {
-  "pipeline_version": "v2-alpha",
-  "seed": 1234,
-  "convention": {
-    "units": "meters",
-    "camera_frame": "right_handed"
+  "seed": 12345,
+  "output_dir": "data/generated/dataset_v2",
+  "background_glob": "data/backgrounds/raw/**/depth/*.npz",
+  "num_samples": 1000,
+  "train_validation_split": {
+    "train": 0.9,
+    "val": 0.1
   },
-  "splits": {
-    "train": 50000,
-    "val": 5000
-  },
-  "domains": {
-    "use_superquadrics": true,
-    "use_stl_pool": true,
-    "use_real_background_composites": true
-  },
-  "placement": {
-    "min_plane_distance_m": 0.03,
-    "max_plane_distance_m": 0.5,
-    "require_center_in_fov": true,
-    "require_camera_outside_bbox": true
-  },
-  "artifacts": {
-    "enabled": true,
-    "hole_probability": 0.01,
-    "edge_noise_std_m": 0.002,
-    "quantization_step_m": 0.001
-  }
+  "workers": 0,
+  "samples_per_task": 10,
+  "max_backgrounds_in_ram": 0,
+  "object_source": "random",
+  "debug_metadata": false,
+  "save_components": false,
+  "compressed_npz": false,
+  "max_attempts_per_sample": 30
 }

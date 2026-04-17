@@ -1,0 +1,15 @@
+{
+  "io": {
+    "input_directory": "data/stl",
+    "output_directory": "data/stl_processed",
+    "glob": "*.stl"
+  },
+  "repair": {
+    "close_holes_max_size": 1000
+  },
+  "remesh": {
+    "enabled": false,
+    "iterations": 4,
+    "target_perc": 1.0
+  }
+}

@@ -3,7 +3,32 @@ Updated version of the pose estimator project
 ## Current Status
 
 - Project split into three modules: data engine, training engine, inference engine
-- Data engine now includes modular camera backends and interactive background capture
+- Data engine is functional end-to-end for dataset generation
+- Training and inference engines are intentionally scaffolded for the next implementation phase
+
+## Architecture Notes
+
+- `data_engine` owns synthetic + real-background compositing, preprocessing, and metadata writing.
+- `training_engine` and `inference_engine` stay decoupled and consume exported dataset artifacts only.
+- Dataset run authority is centralized in `data_engine/config/dataset_config*.json`.
+
+## Dataset Generation (Implemented)
+
+Run split-aware generation from workspace root:
+
+```bash
+python -m data_engine.generate_dataset --scene_config data_engine/config/scene_config.superquadric.example.json --dataset_config data_engine/config/dataset_config.example.json
+```
+
+The generator writes:
+
+- `data/generated/<run_name>/<split>/samples/*.npz`
+- `data/generated/<run_name>/<split>/metadata.jsonl`
+- `data/generated/<run_name>/<split>/summary.json`
+- `data/generated/<run_name>/summary.json`
+
+Lean metadata format (single contract) is documented in
+`data_engine/config/dataset_schema.example.json`.
 
 ## Background Capture (Implemented)
 

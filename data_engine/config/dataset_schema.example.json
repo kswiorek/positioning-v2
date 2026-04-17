@@ -1,5 +1,5 @@
 {
-  "pipeline_version": "v2-alpha",
+  "format": "lean_metadata_v1",
   "convention": {
     "units": "meters",
     "frame": "camera_right_handed"
@@ -7,11 +7,12 @@
   "sample_required_fields": [
     "sample_id",
     "split",
-    "global_seed",
+    "sample_seed",
     "domain_tags",
     "object_id",
     "object_source",
     "background_id",
-    "gt_transform_camera_from_object"
+    "gt_transform_camera_from_object",
+    "depth_npz"
   ]
 }

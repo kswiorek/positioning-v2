@@ -95,28 +95,32 @@ def _create_tapered_superquadric_mesh(
     return mesh
 
 
-def generate_superquadric_canonical_model(config: dict, seed: int | None = None):
+def generate_superquadric_canonical_model(
+    config: dict,
+    seed: int | None = None,
+    include_point_cloud: bool = False,
+):
     """Generate canonical mesh, model cloud, and bbox corners for superquadrics."""
-    model_cfg = config["scene"]["model"]
+    sq_cfg = config["scene"]["superquadric"]
     rng = np.random.default_rng(seed)
 
-    length = float(model_cfg["length"]) * float(rng.uniform(*model_cfg["length_range"]))
+    length = float(sq_cfg["base_length_m"]) * float(rng.uniform(*sq_cfg["length_scale_range"]))
 
-    cross = model_cfg["cross_section"]
+    cross = sq_cfg["cross_section"]
     major_axis = float(rng.uniform(*cross["major_axis_range"]))
     minor_axis = float(rng.uniform(*cross["minor_axis_range"]))
     min_aspect = float(cross.get("min_aspect_ratio", 1.0))
     if major_axis / max(minor_axis, 1e-8) < min_aspect:
         major_axis = minor_axis * float(rng.uniform(min_aspect, min_aspect + 0.3))
 
-    taper_ratio = float(rng.uniform(*model_cfg["taper_ratio_range"]))
-    twist_deg = float(rng.uniform(*model_cfg["twist_angle_range"]))
+    taper_ratio = float(rng.uniform(*sq_cfg["taper_ratio_range"]))
+    twist_deg = float(rng.uniform(*sq_cfg["twist_angle_range_deg"]))
 
-    sq = model_cfg["superquadric"]
-    eps1 = float(rng.uniform(*sq["epsilon_1_range"]))
-    eps2 = float(rng.uniform(*sq["epsilon_2_range"]))
+    exponents = sq_cfg["exponents"]
+    eps1 = float(rng.uniform(*exponents["epsilon_1_range"]))
+    eps2 = float(rng.uniform(*exponents["epsilon_2_range"]))
 
-    resolution = int(model_cfg.get("resolution", 50))
+    resolution = int(sq_cfg.get("mesh_resolution", 50))
 
     mesh = _create_tapered_superquadric_mesh(
         length=length,
@@ -150,11 +154,13 @@ def generate_superquadric_canonical_model(config: dict, seed: int | None = None)
         dtype=np.float32,
     )
 
-    points_n = int(model_cfg.get("sample_points", 5000))
-    if seed is not None:
-        o3d.utility.random.seed(int(seed) & 0x7FFFFFFF)
-    model_cloud = mesh.sample_points_uniformly(number_of_points=points_n)
-    model_cloud.translate(-model_cloud.get_center())
+    points_n = int(sq_cfg.get("point_sample_count", 5000))
+    model_cloud = None
+    if include_point_cloud:
+        if seed is not None:
+            o3d.utility.random.seed(int(seed) & 0x7FFFFFFF)
+        model_cloud = mesh.sample_points_uniformly(number_of_points=points_n)
+        model_cloud.translate(-model_cloud.get_center())
 
     shape_params = {
         "length": length,
@@ -165,6 +171,7 @@ def generate_superquadric_canonical_model(config: dict, seed: int | None = None)
         "epsilon_1": eps1,
         "epsilon_2": eps2,
         "resolution": resolution,
+        "point_sample_count": points_n,
     }
 
     return mesh, model_cloud, bbox_corners, shape_params
