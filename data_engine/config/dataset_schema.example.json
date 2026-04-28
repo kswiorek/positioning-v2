@@ -12,6 +12,7 @@
     "object_id",
     "object_source",
     "background_id",
+    "bbox_corners_m",
     "gt_transform_camera_from_object",
     "depth_npz"
   ]

@@ -4,12 +4,14 @@ Updated version of the pose estimator project
 
 - Project split into three modules: data engine, training engine, inference engine
 - Data engine is functional end-to-end for dataset generation
-- Training and inference engines are intentionally scaffolded for the next implementation phase
+- Training engine now has a modular dataset loader, loss functions, checkpoint helpers, and a reusable loop
+- Inference engine is intentionally scaffolded for the next implementation phase
 
 ## Architecture Notes
 
 - `data_engine` owns synthetic + real-background compositing, preprocessing, and metadata writing.
-- `training_engine` and `inference_engine` stay decoupled and consume exported dataset artifacts only.
+- `training_engine` consumes exported dataset artifacts through a dedicated dataset adapter and owns optimization/checkpointing.
+- `inference_engine` stays decoupled and is still scaffolded.
 - Dataset run authority is centralized in `data_engine/config/dataset_config*.json`.
 
 ## Dataset Generation (Implemented)
@@ -29,6 +31,22 @@ The generator writes:
 
 Lean metadata format (single contract) is documented in
 `data_engine/config/dataset_schema.example.json`.
+
+## Training (Implemented)
+
+Train from a config file in the same style as dataset generation:
+
+```bash
+python -m training_engine.train --config training_engine/training_config.example.json
+```
+
+The training config defines:
+
+- dataset location and split names
+- dataset storage mode (`ram` preloads each split into CPU memory, `disk` streams NPZs)
+- model architecture settings
+- optimizer, scheduler, and loss weights
+- checkpoint/run directory and resume behavior
 
 ## Background Capture (Implemented)
 

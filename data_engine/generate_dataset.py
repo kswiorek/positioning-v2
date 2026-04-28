@@ -167,16 +167,20 @@ def _generate_one_sample(
 
         object_seed = int(rng_master.integers(0, 2**31 - 1))
         try:
-            canonical_mesh, _, bbox_corners, shape_params = generate_mixed_canonical_model(
+            canonical_mesh, model_cloud, bbox_corners, shape_params = generate_mixed_canonical_model(
                 scene_cfg,
                 seed=object_seed,
                 source_override=object_source,
-                include_point_cloud=False,
+                include_point_cloud=True,
             )
         except RuntimeError:
             continue
 
+        if model_cloud is None:
+            continue
+
         bbox_extent = (bbox_corners.max(axis=0) - bbox_corners.min(axis=0)).astype(np.float64)
+        model_points = np.asarray(model_cloud.points, dtype=np.float32)
 
         constraints = PlacementConstraints(
             min_plane_distance_m=float(place_cfg["min_plane_distance_m"]),
@@ -225,10 +229,12 @@ def _generate_one_sample(
                 "background_depth_m": background_depth.astype(np.float32),
                 "object_depth_m": object_depth.astype(np.float32),
                 "composite_depth_m": composite_depth.astype(np.float32),
+                "model_points": model_points,
             }
         else:
             save_dict = {
                 "composite_depth_m": composite_depth.astype(np.float32),
+                "model_points": model_points,
             }
 
         if compressed_npz:
@@ -260,6 +266,7 @@ def _generate_one_sample(
             "background_id": background_id,
             "background_asset_path": background_id,
             "bbox_extent_m": bbox_extent.tolist(),
+            "bbox_corners_m": bbox_corners.astype(np.float32).tolist(),
             "gt_transform_camera_from_object": t_cam_from_obj.tolist(),
             "depth_npz": str(out_path).replace("\\", "/"),
         }

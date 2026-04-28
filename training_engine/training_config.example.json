@@ -1,0 +1,49 @@
+{
+  "run_dir": "runs/hybrid_pose_v2",
+  "max_epochs": 400,
+  "seed": 12345,
+  "device": "cuda",
+  "batch_size": 16,
+  "num_workers": 4,
+  "pin_memory": true,
+  "grad_clip_norm": 1.0,
+  "resume_best": true,
+  "dataset": {
+    "dataset_dir": "data/generated/dataset_v2",
+    "train_split": "train",
+    "val_split": "val",
+    "storage": "ram",
+    "num_points": 512,
+    "depth_max_m": 9.0
+  },
+  "model": {
+    "scene_encoder": {
+      "base_channels": 32,
+      "num_blocks": 4,
+      "feature_dim": 128
+    },
+    "point_encoder": {
+      "hidden_dims": [64, 64, 128, 256],
+      "feature_dim": 128
+    },
+    "fusion": {
+      "hidden_dims": [256, 128],
+      "dropout": 0.3
+    }
+  },
+  "optimizer": {
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001
+  },
+  "scheduler": {
+    "type": "cosine_warm_restarts",
+    "min_learning_rate": 1e-7,
+    "restart_period": 50,
+    "warmup_epochs": 5
+  },
+  "loss": {
+    "translation_weight": 1.0,
+    "rotation_weight": 1.5,
+    "bbox_corner_weight": 2.0
+  }
+}

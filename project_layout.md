@@ -10,8 +10,14 @@ This workspace is split into three independent parts:
 
 - data_engine: implemented and operational (capture, STL preprocessing, mixed object generation,
   compositing, artifacts, split-aware bulk generation, metadata writing).
-- training_engine: scaffold only, API placeholder for future training/validation loop.
+- training_engine: implemented as modular dataset loading, pose losses, checkpointing, model factory, and a reusable training/validation loop.
 - inference_engine: scaffold only, API placeholder for future runtime estimator/refinement.
+
+## Training Entry Point
+
+- `training_engine/training_config.example.json` documents the expected training config shape.
+- `python -m training_engine.train --config training_engine/training_config.example.json` runs the modular training loop.
+- `training_engine.dataset.storage` controls whether a split is preloaded into RAM or read from disk on demand.
 
 ## Boundary Rules
 

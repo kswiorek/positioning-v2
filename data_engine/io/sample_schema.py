@@ -18,6 +18,7 @@ class SampleMetadata:
     background_id: str
     background_asset_path: Optional[str]
     bbox_extent_m: Optional[List[float]]
+    bbox_corners_m: Optional[List[List[float]]]
     gt_transform_camera_from_object: List[List[float]]
     depth_npz: Optional[str] = None
 
