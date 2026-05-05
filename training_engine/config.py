@@ -148,6 +148,24 @@ class LossConfig:
 
 
 @dataclass(frozen=True)
+class MonitoringConfig:
+    log_every_n_batches: int = 10
+    quick_validation_every_n_train_batches: int = 0
+    quick_validation_batches: int = 8
+    tensorboard: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "MonitoringConfig":
+        data = data or {}
+        return cls(
+            log_every_n_batches=int(data.get("log_every_n_batches", 10)),
+            quick_validation_every_n_train_batches=int(data.get("quick_validation_every_n_train_batches", 0)),
+            quick_validation_batches=int(data.get("quick_validation_batches", 8)),
+            tensorboard=bool(data.get("tensorboard", True)),
+        )
+
+
+@dataclass(frozen=True)
 class DatasetConfig:
     dataset_dir: Path
     train_split: str = "train"
@@ -181,6 +199,7 @@ class TrainingConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     loss: LossConfig = field(default_factory=LossConfig)
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     max_epochs: int = 1
     seed: int = 0
     device: str = "cuda"
@@ -201,6 +220,7 @@ class TrainingConfig:
             optimizer=OptimizerConfig.from_dict(data.get("optimizer")),
             scheduler=SchedulerConfig.from_dict(data.get("scheduler")),
             loss=LossConfig.from_dict(data.get("loss")),
+            monitoring=MonitoringConfig.from_dict(data.get("monitoring")),
             max_epochs=int(data.get("max_epochs", 1)),
             seed=int(data.get("seed", 0)),
             device=str(data.get("device", "cuda")),

@@ -5,11 +5,17 @@ from __future__ import annotations
 import csv
 import json
 import math
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except Exception:  # pragma: no cover - optional dependency
+    SummaryWriter = None
 
 from .checkpoints import load_checkpoint, save_checkpoint
 from .config import TrainingConfig
@@ -60,6 +66,7 @@ class TrainingEngine:
         self.checkpoint_dir = self.run_dir / "checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.run_dir / "training_log.csv"
+        self.monitoring = config.monitoring
         self.device = torch.device(config.device if torch.cuda.is_available() or config.device != "cuda" else "cpu")
 
         self.model.to(self.device)
@@ -81,6 +88,12 @@ class TrainingEngine:
         )
         self.best_val_loss = math.inf
         self.start_epoch = 0
+        self.global_step = 0
+        self.writer = None
+        if self.monitoring.tensorboard and SummaryWriter is not None:
+            self.writer = SummaryWriter(log_dir=str(self.run_dir / "tensorboard"))
+        elif self.monitoring.tensorboard:
+            print("TensorBoard is not available; continuing without scalar event logs.")
 
         self._write_config_snapshot()
         self._ensure_log_header()
@@ -113,6 +126,7 @@ class TrainingEngine:
                     "rotation",
                     "bbox_corner",
                     "rotation_error_deg",
+                    "confidence",
                 ],
             )
             writer.writeheader()
@@ -155,6 +169,46 @@ class TrainingEngine:
     def _current_lr(self) -> float:
         return float(self.optimizer.param_groups[0]["lr"])
 
+    def _log_batch_progress(
+        self,
+        phase: str,
+        epoch: int,
+        batch_idx: int,
+        total_batches: int | None,
+        elapsed_s: float,
+        metrics: dict[str, float],
+    ) -> None:
+        if self.monitoring.log_every_n_batches <= 0:
+            return
+        if batch_idx != 1 and batch_idx % self.monitoring.log_every_n_batches != 0:
+            if total_batches is None or batch_idx != total_batches:
+                return
+
+        batch_rate = batch_idx / max(elapsed_s, 1e-6)
+        parts = [
+            f"{phase} epoch {epoch + 1}",
+            f"batch {batch_idx}" if total_batches is None else f"batch {batch_idx}/{total_batches}",
+            f"loss={metrics['loss']:.4f}",
+            f"trans={metrics['translation']:.4f}",
+            f"rot={metrics['rotation']:.4f}",
+            f"bbox={metrics['bbox_corner']:.4f}",
+            f"{batch_rate:.2f} batch/s",
+        ]
+        if "confidence" in metrics:
+            parts.append(f"conf={metrics['confidence']:.4f}")
+        print(" | ".join(parts), flush=True)
+
+    def _write_tensorboard_scalars(
+        self,
+        phase: str,
+        step: int,
+        metrics: dict[str, float],
+    ) -> None:
+        if self.writer is None:
+            return
+        for key, value in metrics.items():
+            self.writer.add_scalar(f"{phase}/{key}", value, step)
+
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         return {
             "depth": batch["depth"].to(self.device, non_blocking=True),
@@ -163,7 +217,15 @@ class TrainingEngine:
             "bbox_corners": batch["bbox_corners"].to(self.device, non_blocking=True),
         }
 
-    def _run_epoch(self, loader: torch.utils.data.DataLoader, train: bool) -> EpochMetrics:
+    def _run_epoch(
+        self,
+        loader: torch.utils.data.DataLoader,
+        train: bool,
+        *,
+        epoch: int,
+        phase: str,
+        max_batches: int | None = None,
+    ) -> EpochMetrics:
         self.model.train(mode=train)
 
         totals = {
@@ -172,13 +234,16 @@ class TrainingEngine:
             "rotation": 0.0,
             "bbox_corner": 0.0,
             "rotation_error_deg": 0.0,
+            "confidence": 0.0,
         }
         n_batches = 0
         use_amp = self.scaler.is_enabled()
         context = torch.enable_grad() if train else torch.no_grad()
+        start_time = time.perf_counter()
+        total_batches = len(loader) if hasattr(loader, "__len__") else None
 
         with context:
-            for batch in loader:
+            for batch_idx, batch in enumerate(loader, start=1):
                 batch = self._move_batch(batch)
                 with torch.amp.autocast(device_type=self.device.type, enabled=use_amp):
                     model_output = self.model(batch["depth"], batch["model_points"])
@@ -211,12 +276,50 @@ class TrainingEngine:
                 for key in totals:
                     if key in loss_dict:
                         totals[key] += float(loss_dict[key].detach().cpu())
-                # Track confidence loss if present
-                if "confidence" in loss_dict and "confidence" not in totals:
-                    totals["confidence"] = 0.0
-                if "confidence" in loss_dict:
-                    totals["confidence"] += float(loss_dict["confidence"].detach().cpu())
                 n_batches += 1
+                if train:
+                    self.global_step += 1
+
+                running = {key: totals[key] / n_batches for key in totals}
+                elapsed_s = time.perf_counter() - start_time
+                self._log_batch_progress(phase, epoch, batch_idx, total_batches, elapsed_s, running)
+
+                if train:
+                    batch_metrics = dict(running)
+                    batch_metrics["lr"] = self._current_lr()
+                    self._write_tensorboard_scalars("batch", self.global_step, batch_metrics)
+
+                    interval = self.monitoring.quick_validation_every_n_train_batches
+                    if interval > 0 and self.monitoring.quick_validation_batches > 0 and self.global_step % interval == 0:
+                        quick_metrics = self._run_epoch(
+                            self.val_loader,
+                            train=False,
+                            epoch=epoch,
+                            phase="quick_val",
+                            max_batches=self.monitoring.quick_validation_batches,
+                        )
+                        quick_row = _metrics_to_row("quick_val", epoch, quick_metrics, self._current_lr())
+                        self._write_tensorboard_scalars(
+                            "quick_val",
+                            self.global_step,
+                            {
+                                "loss": quick_metrics.loss,
+                                "translation": quick_metrics.translation,
+                                "rotation": quick_metrics.rotation,
+                                "bbox_corner": quick_metrics.bbox_corner,
+                                "rotation_error_deg": quick_metrics.rotation_error_deg,
+                                "confidence": quick_metrics.confidence,
+                            },
+                        )
+                        print(
+                            f"quick_val step {self.global_step}: loss={quick_metrics.loss:.4f}, "
+                            f"trans={quick_metrics.translation:.4f}, rot={quick_metrics.rotation:.4f}",
+                            flush=True,
+                        )
+                        self._append_log_row(quick_row)
+
+                if max_batches is not None and batch_idx >= max_batches:
+                    break
 
         divisor = max(n_batches, 1)
         return EpochMetrics(
@@ -225,7 +328,7 @@ class TrainingEngine:
             rotation=totals["rotation"] / divisor,
             bbox_corner=totals["bbox_corner"] / divisor,
             rotation_error_deg=totals["rotation_error_deg"] / divisor,
-                    confidence=totals.get("confidence", 0.0) / divisor,
+            confidence=totals["confidence"] / divisor,
         )
 
     def _step_scheduler(self, epoch: int) -> None:
@@ -251,14 +354,41 @@ class TrainingEngine:
             if self.config.scheduler.warmup_epochs > 0 and epoch < self.config.scheduler.warmup_epochs:
                 self._set_warmup_lr(epoch)
 
-            train_metrics = self._run_epoch(self.train_loader, train=True)
-            val_metrics = self._run_epoch(self.val_loader, train=False)
+            train_metrics = self._run_epoch(self.train_loader, train=True, epoch=epoch, phase="train")
+            val_metrics = self._run_epoch(self.val_loader, train=False, epoch=epoch, phase="val")
 
             current_lr = self._current_lr()
             train_row = _metrics_to_row("train", epoch, train_metrics, current_lr)
             val_row = _metrics_to_row("val", epoch, val_metrics, current_lr)
             self._append_log_row(train_row)
             self._append_log_row(val_row)
+
+            self._write_tensorboard_scalars(
+                "epoch/train",
+                epoch + 1,
+                {
+                    "loss": train_metrics.loss,
+                    "translation": train_metrics.translation,
+                    "rotation": train_metrics.rotation,
+                    "bbox_corner": train_metrics.bbox_corner,
+                    "rotation_error_deg": train_metrics.rotation_error_deg,
+                    "confidence": train_metrics.confidence,
+                },
+            )
+            self._write_tensorboard_scalars(
+                "epoch/val",
+                epoch + 1,
+                {
+                    "loss": val_metrics.loss,
+                    "translation": val_metrics.translation,
+                    "rotation": val_metrics.rotation,
+                    "bbox_corner": val_metrics.bbox_corner,
+                    "rotation_error_deg": val_metrics.rotation_error_deg,
+                    "confidence": val_metrics.confidence,
+                },
+            )
+            if self.writer is not None:
+                self.writer.add_scalar("epoch/lr", current_lr, epoch + 1)
 
             latest_path = self.checkpoint_dir / "latest.pth"
             save_checkpoint(
@@ -293,6 +423,10 @@ class TrainingEngine:
                 "val": val_row,
                 "best_val_loss": self.best_val_loss,
             }
+
+        if self.writer is not None:
+            self.writer.flush()
+            self.writer.close()
 
         return summary
 

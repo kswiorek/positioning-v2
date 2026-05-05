@@ -4,10 +4,16 @@
   "seed": 12345,
   "device": "cuda",
   "batch_size": 16,
-  "num_workers": 4,
+  "num_workers": 0,
   "pin_memory": true,
   "grad_clip_norm": 1.0,
   "resume_best": true,
+  "monitoring": {
+    "log_every_n_batches": 10,
+    "quick_validation_every_n_train_batches": 500,
+    "quick_validation_batches": 8,
+    "tensorboard": true
+  },
   "dataset": {
     "dataset_dir": "data/generated/dataset",
     "train_split": "train",
