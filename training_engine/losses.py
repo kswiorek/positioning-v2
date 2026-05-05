@@ -160,12 +160,6 @@ def pose_loss(
         + bbox_w * bbox_corner_loss
     )
     
-    # Final NaN check before returning
-    if torch.isnan(total_loss):
-        # Fallback to prevent NaN propagation
-        print("WARNING: NaN detected in pose_loss, using fallback")
-        total_loss = torch.tensor(1.0, device=pred_t.device, dtype=pred_t.dtype)
-    
     result = {
         "loss": total_loss,
         "translation": translation_loss.detach(),
@@ -187,5 +181,11 @@ def pose_loss(
         result["confidence"] = conf_loss_dict["loss"].detach()
         result["confidence_t"] = conf_loss_dict["conf_t"]
         result["confidence_r"] = conf_loss_dict["conf_r"]
+
+        # Final NaN check before returning
+    if torch.isnan(total_loss):
+        # Fallback to prevent NaN propagation
+        print("WARNING: NaN detected in pose_loss, using fallback")
+        total_loss = (pred_transform*0).sum() + (pred_conf_t*0).sum() if pred_conf_t is not None else (pred_transform*0).sum()
     
     return result
