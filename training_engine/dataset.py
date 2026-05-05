@@ -111,10 +111,14 @@ class PoseDataset(Dataset):
             self._preload_split()
 
     def _preload_split(self) -> None:
-        depths: list[np.ndarray] = []
-        model_points: list[np.ndarray] = []
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            tqdm = lambda x, **kwargs: x
 
-        for record in self.records:
+        n_samples = len(self.records)
+        
+        for i, record in enumerate(tqdm(self.records, desc=f"Loading {self.split_dir.name} into RAM")):
             with np.load(record.depth_npz, allow_pickle=False) as sample:
                 depth_key = None
                 for candidate in ("composite_depth_m", "depth_image", "depth_m"):
@@ -127,20 +131,23 @@ class PoseDataset(Dataset):
                 depth = np.asarray(sample[depth_key], dtype=np.float32)
                 if self.dataset_cfg.depth_max_m > 0:
                     depth = np.clip(depth / self.dataset_cfg.depth_max_m, 0.0, 1.0)
-                depths.append(depth[None, ...].astype(np.float32, copy=False))
+                depth = depth[None, ...] # (1, H, W)
 
                 if "model_points" not in sample.files:
                     raise KeyError(f"Sample {record.sample_id} does not contain model_points")
-                model_points.append(
-                    _sample_model_points(
-                        np.asarray(sample["model_points"], dtype=np.float32),
-                        sample_seed=record.sample_seed,
-                        num_points=self.dataset_cfg.num_points,
-                    )
+                model_points = _sample_model_points(
+                    np.asarray(sample["model_points"], dtype=np.float32),
+                    sample_seed=record.sample_seed,
+                    num_points=self.dataset_cfg.num_points,
                 )
-
-        self._depths = np.stack(depths, axis=0)
-        self._model_points = np.stack(model_points, axis=0)
+                
+                # Preallocate on first iteration
+                if self._depths is None or self._model_points is None:
+                    self._depths = np.empty((n_samples, *depth.shape), dtype=np.float32)
+                    self._model_points = np.empty((n_samples, *model_points.shape), dtype=np.float32)
+                
+                self._depths[i] = depth
+                self._model_points[i] = model_points
 
     def __len__(self) -> int:
         return len(self.records)

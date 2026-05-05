@@ -86,13 +86,13 @@ class SceneEncoder(nn.Module):
         self.blocks = nn.Sequential(*blocks)
         self.proj = nn.Conv2d(in_ch, feature_dim, kernel_size=1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, tuple[int, int]]:
         x = self.stem(x)
         x = self.blocks(x)
         x = self.proj(x)
         B, C, H, W = x.shape
         tokens = x.permute(0, 2, 3, 1).reshape(B, H * W, C)
-        return tokens
+        return tokens, (H, W)
 
 
 class EdgeConvBlock(nn.Module):
@@ -305,13 +305,7 @@ class HybridPoseNet(nn.Module):
             k=me_cfg.k,
         )
 
-        in_h = int(camera_config.get("padded_height", 256))
-        in_w = int(camera_config.get("resolution", {}).get("width", 320))
-        num_blocks = int(se_cfg.num_blocks)
-        token_h = in_h // (2**num_blocks)
-        token_w = in_w // (2**num_blocks)
-        scene_pos = self._build_2d_sincos_pos_encoding(token_h, token_w, feat_dim)
-        self.register_buffer("scene_pos_2d", scene_pos.unsqueeze(0), persistent=True)
+        self._pos_cache: dict[tuple[int, int], torch.Tensor] = {}
 
         self.cross_attention = nn.ModuleList(
             [CrossAttentionLayer(feat_dim, num_heads=config.cross_attention.num_heads)
@@ -360,10 +354,20 @@ class HybridPoseNet(nn.Module):
         return enc[:, :dim]
 
     def forward(self, depth: torch.Tensor, model_points: torch.Tensor):
-        scene_tokens = self.scene_encoder(depth)
+        scene_tokens, (H, W) = self.scene_encoder(depth)
         model_tokens = self.model_encoder(model_points)
-        scene_pos = self.scene_pos_2d.to(device=scene_tokens.device, dtype=scene_tokens.dtype)
+        
+        # Build or use cached pos encoding based on current H, W
+        key = (H, W)
+        if key not in getattr(self, "_pos_cache", {}) or self._pos_cache[key].device != scene_tokens.device:
+            pos = self._build_2d_sincos_pos_encoding(H, W, scene_tokens.shape[-1])
+            if not hasattr(self, "_pos_cache"):
+                self._pos_cache = {}
+            self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_tokens.device, dtype=scene_tokens.dtype)
+            
+        scene_pos = self._pos_cache[key]
         scene_tokens = scene_tokens + scene_pos
+        
         model_pos = self.model_coord_proj(model_points.to(model_tokens.dtype))
         model_tokens = model_tokens + model_pos
         for layer in self.cross_attention:
