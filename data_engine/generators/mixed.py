@@ -19,7 +19,12 @@ def _stl_available(config: dict) -> bool:
     return any(p.is_file() for p in directory.glob(pattern))
 
 
-def _choose_source(config: dict, rng: np.random.Generator, source_override: str | None) -> str:
+def _choose_source(
+    config: dict,
+    rng: np.random.Generator,
+    source_override: str | None,
+    stl_available: bool | None = None,
+) -> str:
     if source_override is not None:
         source = source_override.strip().lower()
         if source not in {"superquadric", "stl", "random"}:
@@ -34,7 +39,7 @@ def _choose_source(config: dict, rng: np.random.Generator, source_override: str 
     if mode in {"superquadric", "stl"}:
         return mode
 
-    stl_ok = _stl_available(config)
+    stl_ok = _stl_available(config) if stl_available is None else bool(stl_available)
     if not stl_ok:
         return "superquadric"
 
@@ -50,6 +55,17 @@ def _choose_source(config: dict, rng: np.random.Generator, source_override: str 
 
     p_stl = w_stl / max(w_sq + w_stl, 1e-12)
     return "stl" if float(rng.uniform(0.0, 1.0)) < p_stl else "superquadric"
+
+
+def choose_object_source(
+    config: dict,
+    seed: int | None = None,
+    source_override: str | None = None,
+    stl_available: bool | None = None,
+) -> str:
+    """Deterministically resolve the object source used for a sample plan."""
+    rng = np.random.default_rng(seed)
+    return _choose_source(config, rng=rng, source_override=source_override, stl_available=stl_available)
 
 
 def generate_mixed_canonical_model(

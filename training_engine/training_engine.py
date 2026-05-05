@@ -11,18 +11,33 @@ from pathlib import Path
 from typing import Any
 
 import torch
+# torch.autograd.set_detect_anomaly(True)
 
 try:
     from torch.utils.tensorboard import SummaryWriter
 except Exception:  # pragma: no cover - optional dependency
     SummaryWriter = None
 
-from .checkpoints import load_checkpoint, save_checkpoint
-from .config import TrainingConfig
-from .dataset import build_dataloaders
-from .geometry import coerce_pose_output
-from .losses import PoseLossWeights, pose_loss
-from .model import build_model
+# Local imports: prefer package-relative imports, but allow running the file
+# directly as a script by falling back to absolute imports after adjusting
+# `sys.path`.
+try:
+    from .checkpoints import load_checkpoint, save_checkpoint
+    from .config import TrainingConfig
+    from .dataset import build_dataloaders
+    from .geometry import coerce_pose_output
+    from .losses import PoseLossWeights, pose_loss
+    from .model import build_model
+except Exception:  # pragma: no cover - fallback for direct script execution
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from training_engine.checkpoints import load_checkpoint, save_checkpoint
+    from training_engine.config import TrainingConfig
+    from training_engine.dataset import build_dataloaders
+    from training_engine.geometry import coerce_pose_output
+    from training_engine.losses import PoseLossWeights, pose_loss
+    from training_engine.model import build_model
 
 
 @dataclass(frozen=True)
@@ -239,6 +254,7 @@ class TrainingEngine:
         n_batches = 0
         use_amp = self.scaler.is_enabled()
         context = torch.enable_grad() if train else torch.no_grad()
+        # use_amp = False
         start_time = time.perf_counter()
         total_batches = len(loader) if hasattr(loader, "__len__") else None
 
@@ -399,6 +415,7 @@ class TrainingEngine:
                 scaler=self.scaler,
                 epoch=epoch,
                 best_val_loss=self.best_val_loss,
+                global_step=self.global_step,
                 extra={"train": train_row, "val": val_row},
             )
 
@@ -412,6 +429,7 @@ class TrainingEngine:
                     scaler=self.scaler,
                     epoch=epoch,
                     best_val_loss=self.best_val_loss,
+                    global_step=self.global_step,
                     extra={"train": train_row, "val": val_row},
                 )
 
@@ -444,5 +462,15 @@ def load_and_resume(
         map_location=engine.device,
     )
     engine.start_epoch = int(payload.get("epoch", -1)) + 1
+    engine.global_step = int(payload.get("global_step", 0))
     engine.best_val_loss = float(payload.get("best_val_loss", math.inf))
+
+    if engine.writer is not None and SummaryWriter is not None:
+        engine.writer.flush()
+        engine.writer.close()
+        engine.writer = SummaryWriter(
+            log_dir=str(engine.run_dir / "tensorboard"),
+            purge_step=engine.global_step,
+        )
+
     return payload

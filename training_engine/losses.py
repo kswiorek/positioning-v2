@@ -114,6 +114,10 @@ def pose_loss(
     conf_w = getattr(weights, "confidence_weight", 0.0)
     conf_temp = getattr(weights, "confidence_temperature", 1.0)
     
+    assert not torch.isnan(gt_transform).any(), "NaN in ground truth data!"
+    assert not torch.isnan(bbox_corners).any(), "NaN in bbox corners data!"
+    assert not torch.isnan(pred_transform).any(), "NaN in model predictions (exploding gradients?)"
+    
     pred_t = pred_transform[:, :3, 3]           # [B, 3]
     gt_t   = gt_transform[:, :3, 3]
     pred_R = pred_transform[:, :3, :3]          # [B, 3, 3]
@@ -130,7 +134,8 @@ def pose_loss(
     axis_weights = axis_weights / axis_weights.mean()
     translation_loss = (axis_weights * (pred_t - gt_t) ** 2).mean()
     translation_loss = torch.clamp(translation_loss, max=1e4)  # Prevent explosion
-    trans_error = torch.norm(pred_t - gt_t+1e-6, dim=-1)  # [B]
+    trans_sq_dist = ((pred_t - gt_t) ** 2).sum(dim=-1)
+    trans_error = torch.sqrt(trans_sq_dist + 1e-6)  # [B]
 
     # ── Rotation loss (smooth SO(3) surrogate: 1 - cos(theta)) ─────────────
     # R_diff = pred_R^T @ gt_R is identity when perfect.

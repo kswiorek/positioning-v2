@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from scipy.spatial.transform import Rotation
+from tqdm import tqdm
 
 from data_engine.composition.background_normalization import normalize_and_randomize_background_depth
 from data_engine.composition.camera_artifacts import apply_camera_artifacts
@@ -20,11 +23,30 @@ from data_engine.composition.depth_compositor import compose_depth, render_mesh_
 from data_engine.composition.plane_fit import fit_plane_from_depth
 from data_engine.composition.plane_placement import PlacementConstraints
 from data_engine.composition.placement_sampling import sample_pose_on_plane
-from data_engine.generators import generate_mixed_canonical_model
+from data_engine.generators import generate_superquadric_canonical_model
+from data_engine.generators.mixed import choose_object_source
+from data_engine.generators.stl import build_stl_canonical_model_from_cache, preload_stl_asset_chunk
 
 _WORKER_SCENE_CFG: dict[str, Any] | None = None
 _WORKER_BG_DEPTHS: list[np.ndarray] = []
 _WORKER_BG_IDS: list[str] = []
+_WORKER_STL_ASSETS: dict[str, Any] = {}
+
+
+@dataclass(frozen=True)
+class SamplePlan:
+    sample_index: int
+    sample_seed: int
+    split: str
+    source: str
+    shape_seed: int
+    stl_path: str | None = None
+    stl_chunk_id: int | None = None
+
+
+def _stable_seed_for_path(path: Path, extra: str = "") -> int:
+    digest = hashlib.sha1(f"{path.resolve().as_posix()}::{extra}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="little", signed=False) & 0x7FFFFFFF
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -77,7 +99,7 @@ def _seed_for_sample(base_seed: int, sample_index: int, attempt: int = 0) -> int
     return int((base_seed * 1000003 + sample_index * 9176 + attempt * 1315423911) % (2**63 - 1))
 
 
-def _init_worker(scene_cfg: dict[str, Any], background_paths: list[str], max_backgrounds_in_ram: int) -> None:
+def _load_background_cache(scene_cfg: dict[str, Any], background_paths: list[str], max_backgrounds_in_ram: int) -> None:
     global _WORKER_SCENE_CFG, _WORKER_BG_DEPTHS, _WORKER_BG_IDS
 
     _WORKER_SCENE_CFG = scene_cfg
@@ -93,15 +115,14 @@ def _init_worker(scene_cfg: dict[str, Any], background_paths: list[str], max_bac
     ids: list[str] = []
     for p in paths:
         arr = np.load(p)["depth_m"].astype(np.float32)
-        if expected_w > 0 and expected_h > 0:
-            if arr.shape != (expected_h, expected_w):
-                continue
+        if expected_w > 0 and expected_h > 0 and arr.shape != (expected_h, expected_w):
+            continue
         depths.append(arr)
         ids.append(str(Path(p).as_posix()))
 
     if not depths:
         raise RuntimeError(
-            "Worker could not load any resolution-compatible backgrounds into RAM. "
+            "Could not load any resolution-compatible backgrounds into RAM. "
             f"Expected shape {(expected_h, expected_w)}."
         )
 
@@ -109,11 +130,63 @@ def _init_worker(scene_cfg: dict[str, Any], background_paths: list[str], max_bac
     _WORKER_BG_IDS = ids
 
 
-def _generate_one_sample(
+def _set_stl_cache(stl_assets: dict[str, Any]) -> None:
+    global _WORKER_STL_ASSETS
+    _WORKER_STL_ASSETS = stl_assets
+
+
+def _list_stl_files(scene_cfg: dict[str, Any]) -> list[Path]:
+    stl_cfg = scene_cfg.get("scene", {}).get("stl", {})
+    input_cfg = stl_cfg.get("input", {})
+    directory = Path(input_cfg.get("directory", "data/stl"))
+    pattern = str(input_cfg.get("glob", "*.stl"))
+    return sorted(p for p in directory.glob(pattern) if p.is_file())
+
+
+def _build_sample_plan(
     sample_index: int,
     base_seed: int,
     split: str,
-    object_source: str,
+    scene_cfg: dict[str, Any],
+    stl_files: list[Path],
+    stl_available: bool,
+    stl_chunk_size: int,
+    source_override: str,
+) -> SamplePlan:
+    sample_seed = _seed_for_sample(base_seed, sample_index, 0)
+    rng = np.random.default_rng(sample_seed)
+    source = choose_object_source(
+        scene_cfg,
+        seed=sample_seed,
+        source_override=source_override,
+        stl_available=stl_available,
+    )
+    shape_seed = int(rng.integers(0, 2**31 - 1))
+
+    stl_path = None
+    if source == "stl":
+        if not stl_files:
+            raise RuntimeError("No STL files are available for STL sample planning")
+        stl_rng = np.random.default_rng(shape_seed)
+        stl_idx = int(stl_rng.integers(0, len(stl_files)))
+        stl_path = stl_files[stl_idx].resolve().as_posix()
+        stl_chunk_id = stl_idx // max(stl_chunk_size, 1)
+    else:
+        stl_chunk_id = None
+
+    return SamplePlan(
+        sample_index=sample_index,
+        sample_seed=sample_seed,
+        split=split,
+        source=source,
+        shape_seed=shape_seed,
+        stl_path=stl_path,
+        stl_chunk_id=stl_chunk_id,
+    )
+
+
+def _generate_sample_from_plan(
+    plan: SamplePlan,
     out_samples_dir: str,
     save_components: bool,
     compressed_npz: bool,
@@ -130,7 +203,7 @@ def _generate_one_sample(
     camera_artifacts_cfg = scene_cfg.get("camera_artifacts", {})
 
     for attempt in range(max_attempts_per_sample):
-        sample_seed = _seed_for_sample(base_seed, sample_index, attempt)
+        sample_seed = plan.sample_seed if attempt == 0 else _seed_for_sample(plan.sample_seed, plan.sample_index, attempt)
         rng_master = np.random.default_rng(sample_seed)
 
         bg_idx = int(rng_master.integers(0, len(_WORKER_BG_DEPTHS)))
@@ -165,14 +238,53 @@ def _generate_one_sample(
             seed=int(rng_master.integers(0, 2**31 - 1)),
         )
 
-        object_seed = int(rng_master.integers(0, 2**31 - 1))
+        object_seed = plan.shape_seed
         try:
-            canonical_mesh, model_cloud, bbox_corners, shape_params = generate_mixed_canonical_model(
-                scene_cfg,
-                seed=object_seed,
-                source_override=object_source,
-                include_point_cloud=True,
-            )
+            if plan.source == "stl":
+                if not plan.stl_path:
+                    raise RuntimeError("STL sample plan is missing stl_path")
+                if not _WORKER_STL_ASSETS:
+                    raise RuntimeError("No preloaded STL assets available in worker cache")
+
+                # Prefer the planned STL; if it was skipped during preload, fall back to another valid STL.
+                candidate_paths: list[str] = []
+                if plan.stl_path in _WORKER_STL_ASSETS:
+                    candidate_paths.append(plan.stl_path)
+
+                alternatives = [p for p in _WORKER_STL_ASSETS.keys() if p != plan.stl_path]
+                if alternatives:
+                    alt_offset = int(rng_master.integers(0, len(alternatives)))
+                    alternatives = alternatives[alt_offset:] + alternatives[:alt_offset]
+                    candidate_paths.extend(alternatives)
+
+                stl_build_error: RuntimeError | None = None
+                for selected_stl_path in candidate_paths:
+                    cached_asset = _WORKER_STL_ASSETS.get(selected_stl_path)
+                    if cached_asset is None:
+                        continue
+                    try:
+                        canonical_mesh, model_cloud, bbox_corners, shape_params = build_stl_canonical_model_from_cache(
+                            scene_cfg,
+                            selected_path=Path(selected_stl_path),
+                            cached_asset=cached_asset,
+                            seed=object_seed,
+                            include_point_cloud=True,
+                        )
+                        break
+                    except RuntimeError as e:
+                        stl_build_error = e
+                else:
+                    if stl_build_error is not None:
+                        raise stl_build_error
+                    raise RuntimeError(f"No usable STL assets found for sample {plan.sample_index}")
+            else:
+                canonical_mesh, model_cloud, bbox_corners, shape_params = generate_superquadric_canonical_model(
+                    scene_cfg,
+                    seed=object_seed,
+                    include_point_cloud=True,
+                )
+                shape_params = dict(shape_params)
+                shape_params.setdefault("object_source", "superquadric")
         except RuntimeError:
             continue
 
@@ -219,7 +331,7 @@ def _generate_one_sample(
             rng=artifacts_rng,
         )
 
-        sample_id = f"{sample_index:06d}"
+        sample_id = f"{plan.sample_index:06d}"
         out_path = Path(out_samples_dir) / f"{sample_id}.npz"
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -257,8 +369,8 @@ def _generate_one_sample(
 
         metadata = {
             "sample_id": sample_id,
-            "split": split,
-            "sample_seed": int(sample_seed),
+            "split": plan.split,
+            "sample_seed": int(plan.sample_seed),
             "domain_tags": domain_tags,
             "object_id": shape_params.get("object_id", ""),
             "object_source": shape_params.get("object_source", "unknown"),
@@ -274,7 +386,7 @@ def _generate_one_sample(
         debug_metadata = {
             "sample_id": sample_id,
             "success": True,
-            "seed": sample_seed,
+            "seed": plan.sample_seed,
             "background_id": background_id,
             "object_source": shape_params.get("object_source", "unknown"),
             "object_id": shape_params.get("object_id", ""),
@@ -322,9 +434,9 @@ def _generate_one_sample(
     return {
         "success": False,
         "metadata": {
-            "sample_id": f"{sample_index:06d}",
-            "split": split,
-            "sample_seed": int(_seed_for_sample(base_seed, sample_index, 0)),
+            "sample_id": f"{plan.sample_index:06d}",
+            "split": plan.split,
+            "sample_seed": int(plan.sample_seed),
             "domain_tags": ["failed_generation"],
             "object_id": "",
             "object_source": "unknown",
@@ -334,32 +446,25 @@ def _generate_one_sample(
             "gt_transform_camera_from_object": np.eye(4, dtype=np.float64).tolist(),
         },
         "debug_metadata": {
-            "sample_id": f"{sample_index:06d}",
+            "sample_id": f"{plan.sample_index:06d}",
             "success": False,
         },
         "error": f"failed_after_{max_attempts_per_sample}_attempts",
     }
 
 
-def _generate_chunk(
-    start_idx: int,
-    end_idx: int,
-    base_seed: int,
-    split: str,
-    object_source: str,
+def _generate_plan_batch(
+    plans: list[SamplePlan],
     out_samples_dir: str,
     save_components: bool,
     compressed_npz: bool,
     max_attempts_per_sample: int,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for i in range(start_idx, end_idx):
+    for plan in plans:
         out.append(
-            _generate_one_sample(
-                sample_index=i,
-                base_seed=base_seed,
-                split=split,
-                object_source=object_source,
+            _generate_sample_from_plan(
+                plan=plan,
                 out_samples_dir=out_samples_dir,
                 save_components=save_components,
                 compressed_npz=compressed_npz,
@@ -383,6 +488,7 @@ def build_dataset(
     debug_metadata: bool,
     save_components: bool,
     compressed_npz: bool,
+    stl_chunk_size: int,
     max_attempts_per_sample: int,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -393,12 +499,91 @@ def build_dataset(
     debug_metadata_jsonl = output_dir / "metadata_debug.jsonl"
     summary_json = output_dir / "summary.json"
 
-    chunk_count = int(math.ceil(num_samples / samples_per_task))
-    tasks: list[tuple[int, int]] = []
-    for chunk_idx in range(chunk_count):
-        s = chunk_idx * samples_per_task
-        e = min(num_samples, s + samples_per_task)
-        tasks.append((s, e))
+    if stl_chunk_size <= 0:
+        stl_chunk_size = 1
+
+    _load_background_cache(scene_cfg, background_paths, max_backgrounds_in_ram)
+
+    stl_files = _list_stl_files(scene_cfg)
+    stl_chunk_size = min(stl_chunk_size, max(len(stl_files), 1))
+    stl_available = bool(stl_files)
+
+    sample_plans: list[SamplePlan] = []
+    superquadric_plans: list[SamplePlan] = []
+    stl_plans_by_chunk: dict[int, list[SamplePlan]] = {}
+    for sample_index in range(num_samples):
+        plan = _build_sample_plan(
+            sample_index=sample_index,
+            base_seed=base_seed,
+            split=split,
+            scene_cfg=scene_cfg,
+            stl_files=stl_files,
+            stl_available=stl_available,
+            stl_chunk_size=stl_chunk_size,
+            source_override=object_source,
+        )
+        sample_plans.append(plan)
+        if plan.source == "stl" and plan.stl_chunk_id is not None:
+            stl_plans_by_chunk.setdefault(plan.stl_chunk_id, []).append(plan)
+        else:
+            superquadric_plans.append(plan)
+
+    def _write_records(batch_records: list[dict[str, Any]], meta_f, debug_f) -> tuple[int, int]:
+        batch_success = 0
+        batch_fail = 0
+        for rec in batch_records:
+            meta_f.write(json.dumps(rec["metadata"]) + "\n")
+            meta_f.flush()
+            os.fsync(meta_f.fileno())
+            if debug_f is not None:
+                debug_f.write(json.dumps(rec["debug_metadata"]) + "\n")
+                debug_f.flush()
+                os.fsync(debug_f.fileno())
+            if rec.get("success", False):
+                batch_success += 1
+            else:
+                batch_fail += 1
+        return batch_success, batch_fail
+
+    def _run_batch(plans: list[SamplePlan], stl_assets: dict[str, Any]) -> list[dict[str, Any]]:
+        if not plans:
+            return 0, 0
+        _set_stl_cache(stl_assets)
+        batch_success = 0
+        batch_fail = 0
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(
+                    _generate_sample_from_plan,
+                    plan,
+                    str(samples_dir),
+                    save_components,
+                    compressed_npz,
+                    max_attempts_per_sample,
+                )
+                for plan in plans
+            ]
+            for fut in as_completed(futures):
+                rec = fut.result()
+                meta_f.write(json.dumps(rec["metadata"]) + "\n")
+                meta_f.flush()
+                os.fsync(meta_f.fileno())
+                if debug_f is not None:
+                    debug_f.write(json.dumps(rec["debug_metadata"]) + "\n")
+                    debug_f.flush()
+                    os.fsync(debug_f.fileno())
+                if rec.get("success", False):
+                    batch_success += 1
+                else:
+                    batch_fail += 1
+                progress_bar.update(1)
+                elapsed = max(time.perf_counter() - start_time, 1e-9)
+                progress_bar.set_postfix(
+                    success=success_count + batch_success,
+                    failed=fail_count + batch_fail,
+                    rate=f"{progress_bar.n / elapsed:.2f}/s",
+                )
+        return batch_success, batch_fail
 
     start_time = time.perf_counter()
     success_count = 0
@@ -408,48 +593,23 @@ def build_dataset(
         debug_f = None
         if debug_metadata:
             debug_f = debug_metadata_jsonl.open("w", encoding="utf-8")
-        with ProcessPoolExecutor(
-            max_workers=workers,
-            initializer=_init_worker,
-            initargs=(scene_cfg, background_paths, max_backgrounds_in_ram),
-        ) as ex:
-            futures = [
-                ex.submit(
-                    _generate_chunk,
-                    s,
-                    e,
-                    base_seed,
-                    split,
-                    object_source,
-                    str(samples_dir),
-                    save_components,
-                    compressed_npz,
-                    max_attempts_per_sample,
+        with tqdm(total=num_samples, desc=f"Generating {split}", unit="sample") as progress_bar:
+            batch_success, batch_fail = _run_batch(superquadric_plans, {})
+            success_count += batch_success
+            fail_count += batch_fail
+
+            for chunk_id in tqdm(sorted(stl_plans_by_chunk.keys()), desc="STL chunks", unit="chunk", leave=False):
+                chunk_start = chunk_id * stl_chunk_size
+                chunk_end = min(len(stl_files), chunk_start + stl_chunk_size)
+                chunk_paths = stl_files[chunk_start:chunk_end]
+                stl_assets = preload_stl_asset_chunk(
+                    scene_cfg,
+                    chunk_paths,
+                    int(scene_cfg.get("scene", {}).get("stl", {}).get("points", {}).get("sample_count", 5000)),
                 )
-                for s, e in tasks
-            ]
-
-            processed = 0
-            for fut in as_completed(futures):
-                records = fut.result()
-                for rec in records:
-                    meta_f.write(json.dumps(rec["metadata"]) + "\n")
-                    if debug_f is not None:
-                        debug_f.write(json.dumps(rec["debug_metadata"]) + "\n")
-                    processed += 1
-                    if rec.get("success", False):
-                        success_count += 1
-                    else:
-                        fail_count += 1
-
-                if processed % max(50, samples_per_task) == 0 or processed == num_samples:
-                    elapsed = max(time.perf_counter() - start_time, 1e-9)
-                    rate = processed / elapsed
-                    print(
-                        f"Progress: {processed}/{num_samples} samples, "
-                        f"success={success_count}, fail={fail_count}, "
-                        f"rate={rate:.2f} samples/s"
-                    )
+                batch_success, batch_fail = _run_batch(stl_plans_by_chunk[chunk_id], stl_assets)
+                success_count += batch_success
+                fail_count += batch_fail
 
         if debug_f is not None:
             debug_f.close()
@@ -520,6 +680,7 @@ def main() -> None:
     debug_metadata = bool(dataset_cfg.get("debug_metadata", False))
     save_components = bool(dataset_cfg.get("save_components", False))
     compressed_npz = bool(dataset_cfg.get("compressed_npz", False))
+    stl_chunk_size = max(int(dataset_cfg.get("stl_chunk_size", 32)), 1)
     max_attempts_per_sample = max(int(dataset_cfg.get("max_attempts_per_sample", 20)), 1)
     base_seed = int(dataset_cfg.get("seed", 12345))
 
@@ -557,6 +718,7 @@ def main() -> None:
             debug_metadata=debug_metadata,
             save_components=save_components,
             compressed_npz=compressed_npz,
+            stl_chunk_size=stl_chunk_size,
             max_attempts_per_sample=max_attempts_per_sample,
         )
         split_summaries[split_name] = summary

@@ -4,6 +4,10 @@
     "output_directory": "data/stl_processed",
     "glob": "*.stl"
   },
+  "runtime": {
+    "per_file_timeout_sec": 3.0,
+    "max_workers": 20
+  },
   "repair": {
     "close_holes_max_size": 1000
   },

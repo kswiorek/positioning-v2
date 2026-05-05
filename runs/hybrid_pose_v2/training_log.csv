@@ -1,0 +1,1 @@
+epoch,phase,lr,loss,translation,rotation,bbox_corner,rotation_error_deg,confidence

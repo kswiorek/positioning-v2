@@ -15,7 +15,7 @@ from .config import (
 from .dataset import PoseDataset, build_dataloaders
 from .geometry import apply_transform, build_transform_from_Rt, coerce_pose_output, rotation_6d_to_matrix
 from .losses import PoseLossWeights, pose_loss
-from .model import PoseFusionNet, build_model
+from .model import HybridPoseNet, build_model
 from .training_engine import TrainingEngine, load_and_resume
 
 __all__ = [
@@ -30,7 +30,7 @@ __all__ = [
 	"OptimizerConfig",
 	"PoseDataset",
 	"PoseLossWeights",
-	"PoseFusionNet",
+	"HybridPoseNet",
 	"PointEncoderConfig",
 	"SceneEncoderConfig",
 	"SchedulerConfig",

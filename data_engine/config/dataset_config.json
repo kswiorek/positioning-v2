@@ -1,0 +1,19 @@
+{
+  "seed": 12345,
+  "output_dir": "data/generated/dataset_test",
+  "background_glob": "data/backgrounds/raw/**/depth/*.npz",
+  "num_samples": 1000,
+  "train_validation_split": {
+    "train": 0.75,
+    "val": 0.25
+  },
+  "workers": 10,
+  "samples_per_task": 5,
+  "max_backgrounds_in_ram": 200,
+  "stl_chunk_size": 256,
+  "object_source": "random",
+  "debug_metadata": false,
+  "save_components": false,
+  "compressed_npz": false,
+  "max_attempts_per_sample": 30
+}

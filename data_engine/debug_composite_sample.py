@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--depth_npz", required=True, help="Path to background depth npz (expects key depth_m)")
     parser.add_argument(
         "--scene_config",
-        default="data_engine/config/scene_config.superquadric.example.json",
+        default="data_engine/config/scene_config.json",
         help="Path to scene config JSON",
     )
     parser.add_argument(

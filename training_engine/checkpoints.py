@@ -15,6 +15,7 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     epoch: int,
     best_val_loss: float,
+    global_step: int = 0,
     scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
     scaler: torch.amp.GradScaler | None = None,
     extra: dict[str, Any] | None = None,
@@ -22,6 +23,7 @@ def save_checkpoint(
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "epoch": int(epoch),
+        "global_step": int(global_step),
         "best_val_loss": float(best_val_loss),
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),

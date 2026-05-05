@@ -10,6 +10,7 @@
   "workers": 0,
   "samples_per_task": 10,
   "max_backgrounds_in_ram": 0,
+  "stl_chunk_size": 32,
   "object_source": "random",
   "debug_metadata": false,
   "save_components": false,

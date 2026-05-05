@@ -1,0 +1,81 @@
+{
+  "training": {
+    "run_dir": "runs\\hybrid_pose_v2",
+    "model": {
+      "scene_encoder": {
+        "base_channels": 64,
+        "num_blocks": 4,
+        "res_blocks_per_stride": 2,
+        "feature_dim": 256
+      },
+      "point_encoder": {
+        "hidden_dims": [
+          64,
+          128,
+          256,
+          512
+        ],
+        "feature_dim": 256,
+        "k": 32
+      },
+      "cross_attention": {
+        "num_heads": 8,
+        "num_layers": 4
+      },
+      "fusion": {
+        "hidden_dims": [
+          512,
+          256,
+          128
+        ],
+        "dropout": 0.3
+      }
+    },
+    "dataset": {
+      "dataset_dir": "data\\generated\\dataset",
+      "train_split": "train",
+      "val_split": "val",
+      "storage": "ram",
+      "num_points": 1024,
+      "depth_max_m": 9.0
+    },
+    "optimizer": {
+      "learning_rate": 0.0003,
+      "weight_decay": 0.0001
+    },
+    "scheduler": {
+      "type": "cosine_warm_restarts",
+      "min_learning_rate": 1e-07,
+      "restart_period": 50,
+      "warmup_epochs": 5
+    },
+    "loss": {
+      "translation_weight": 7.0,
+      "rotation_weight": 1.5,
+      "bbox_corner_weight": 2.0,
+      "confidence_weight": 0.5,
+      "confidence_temperature": 0.1,
+      "translation_axis_weights": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "monitoring": {
+      "log_every_n_batches": 10,
+      "quick_validation_every_n_train_batches": 500,
+      "quick_validation_batches": 8,
+      "tensorboard": true
+    },
+    "max_epochs": 400,
+    "seed": 12345,
+    "device": "cuda",
+    "batch_size": 16,
+    "num_workers": 0,
+    "pin_memory": true,
+    "grad_clip_norm": 1.0,
+    "resume_from": null,
+    "resume_best": true
+  },
+  "device": "cuda"
+}

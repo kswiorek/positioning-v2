@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +11,13 @@ import open3d as o3d
 
 
 _STL_BASE_MESH_CACHE: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+
+@dataclass(frozen=True)
+class CachedStlAsset:
+    vertices: np.ndarray
+    triangles: np.ndarray
+    points: np.ndarray
 
 
 def _ensure_outward_normals(mesh: o3d.geometry.TriangleMesh) -> None:
@@ -47,6 +56,11 @@ def _bbox_corners_from_mesh(mesh: o3d.geometry.TriangleMesh) -> np.ndarray:
     )
 
 
+def _stable_seed_for_path(path: Path, extra: str = "") -> int:
+    digest = hashlib.sha1(f"{path.resolve().as_posix()}::{extra}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="little", signed=False) & 0x7FFFFFFF
+
+
 def _list_stl_files(stl_cfg: dict) -> list[Path]:
     input_cfg = stl_cfg.get("input", {})
     directory = Path(input_cfg.get("directory", "data/stl"))
@@ -80,6 +94,118 @@ def _get_cached_stl_mesh(stl_path: Path) -> o3d.geometry.TriangleMesh:
     mesh.vertices = o3d.utility.Vector3dVector(vertices.copy())
     mesh.triangles = o3d.utility.Vector3iVector(triangles.copy())
     return mesh
+
+
+def preload_stl_asset_chunk(
+    config: dict,
+    stl_paths: list[Path],
+    point_sample_count: int,
+) -> dict[str, CachedStlAsset]:
+    """Load a chunk of STL assets into memory once, including a canonical point cloud per asset.
+    
+    Skips corrupted files with a warning instead of crashing.
+    """
+    scene_cfg = config.get("scene", {})
+    stl_cfg = scene_cfg.get("stl", {})
+
+    assets: dict[str, CachedStlAsset] = {}
+    skipped_paths = []
+    
+    for stl_path in stl_paths:
+        try:
+            mesh = _get_cached_stl_mesh(stl_path)
+        except RuntimeError as e:
+            print(f"WARNING: Skipping corrupted STL file: {stl_path}")
+            print(f"  Error: {e}")
+            skipped_paths.append(str(stl_path))
+            continue
+
+        vertices = np.asarray(mesh.vertices, dtype=np.float64)
+        triangles = np.asarray(mesh.triangles, dtype=np.int32)
+
+        if point_sample_count > 0:
+            sample_seed = _stable_seed_for_path(stl_path, extra=f"points:{point_sample_count}")
+            o3d.utility.random.seed(sample_seed)
+            points_mesh = o3d.geometry.TriangleMesh()
+            points_mesh.vertices = o3d.utility.Vector3dVector(vertices.copy())
+            points_mesh.triangles = o3d.utility.Vector3iVector(triangles.copy())
+            points = np.asarray(
+                points_mesh.sample_points_uniformly(number_of_points=point_sample_count).points,
+                dtype=np.float32,
+            )
+        else:
+            points = np.zeros((0, 3), dtype=np.float32)
+
+        assets[stl_path.resolve().as_posix()] = CachedStlAsset(
+            vertices=vertices,
+            triangles=triangles,
+            points=points,
+        )
+    
+    if skipped_paths:
+        print(f"INFO: Preload skipped {len(skipped_paths)} corrupted STL file(s)")
+
+    return assets
+
+
+def build_stl_canonical_model_from_cache(
+    config: dict,
+    selected_path: Path,
+    cached_asset: CachedStlAsset,
+    seed: int | None = None,
+    include_point_cloud: bool = False,
+):
+    """Build a canonical STL sample from a preloaded asset cache entry."""
+    scene_cfg = config.get("scene", {})
+    stl_cfg = scene_cfg.get("stl", {})
+    rng = np.random.default_rng(seed)
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(np.asarray(cached_asset.vertices, dtype=np.float64).copy())
+    mesh.triangles = o3d.utility.Vector3iVector(np.asarray(cached_asset.triangles, dtype=np.int32).copy())
+
+    extent = mesh.get_axis_aligned_bounding_box().get_extent()
+    max_dim = float(np.max(np.asarray(extent, dtype=np.float64)))
+    if max_dim <= 1e-9:
+        raise RuntimeError(f"STL mesh appears degenerate (max AABB dim near zero): {selected_path}")
+
+    norm_cfg = stl_cfg.get("normalization", {})
+    target_range = norm_cfg.get("max_aabb_dimension_range_m", [0.8, 1.2])
+    target_min = float(target_range[0])
+    target_max = float(target_range[1])
+    if target_max < target_min:
+        target_min, target_max = target_max, target_min
+
+    target_max_dim = float(rng.uniform(target_min, target_max))
+    scale_factor = target_max_dim / max_dim
+    mesh.scale(scale_factor, center=(0.0, 0.0, 0.0))
+    mesh.translate(-mesh.get_center())
+
+    bbox_corners = _bbox_corners_from_mesh(mesh)
+
+    points_cfg = stl_cfg.get("points", {})
+    sq_cfg = scene_cfg.get("superquadric", {})
+    points_n = int(points_cfg.get("sample_count", sq_cfg.get("point_sample_count", 5000)))
+    model_cloud = None
+    if include_point_cloud:
+        if len(cached_asset.points) == 0:
+            model_cloud = mesh.sample_points_uniformly(number_of_points=points_n)
+        else:
+            points = np.asarray(cached_asset.points, dtype=np.float64) * scale_factor
+            model_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+        model_cloud.translate(-model_cloud.get_center())
+
+    shape_params = {
+        "object_source": "stl",
+        "object_id": selected_path.stem,
+        "object_asset_path": str(selected_path).replace("\\", "/"),
+        "max_aabb_dim_before_scale_m": max_dim,
+        "target_max_aabb_dim_m": target_max_dim,
+        "normalization_scale": scale_factor,
+        "sample_points": points_n,
+    }
+
+    return mesh, model_cloud, bbox_corners, shape_params
 
 
 def generate_stl_canonical_model(
