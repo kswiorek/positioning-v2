@@ -15,7 +15,7 @@
     "tensorboard": true
   },
   "dataset": {
-    "dataset_dir": "data/generated/dataset",
+    "dataset_dir": "data/generated/dataset_test",
     "train_split": "train",
     "val_split": "val",
     "storage": "ram",
@@ -44,7 +44,7 @@
     }
   },
   "optimizer": {
-    "learning_rate": 3e-4,
+    "learning_rate": 5e-5,
     "weight_decay": 0.0001
   },
   "scheduler": {
@@ -55,7 +55,7 @@
   },
   "loss": {
     "translation_weight": 7.0,
-    "rotation_weight": 1.5,
+    "rotation_weight": 3.0,
     "bbox_corner_weight": 2.0,
     "confidence_weight": 0.5,
     "confidence_temperature": 0.1,

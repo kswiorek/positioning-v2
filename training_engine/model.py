@@ -13,6 +13,14 @@ from .config import ModelConfig, TrainingConfig
 from .geometry import rotation_6d_to_matrix
 
 
+def _check_finite(name: str, tensor: torch.Tensor) -> None:
+    if not torch.isfinite(tensor).all():
+        bad_count = int((~torch.isfinite(tensor)).sum().item())
+        raise RuntimeError(
+            f"Non-finite tensor at {name}: dtype={tensor.dtype}, shape={tuple(tensor.shape)}, bad_count={bad_count}"
+        )
+
+
 def _knn_indices(x: torch.Tensor, k: int) -> torch.Tensor:
     """Compute batched k-NN indices in feature space."""
     B, N, _ = x.shape
@@ -51,7 +59,9 @@ class ConvBNReLU(nn.Module):
         self.bn = nn.BatchNorm2d(out_ch)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.relu(self.bn(self.conv(x)))
+        out = F.relu(self.bn(self.conv(x)))
+        _check_finite(f"ConvBNReLU[{self.conv.in_channels}->{self.conv.out_channels}]", out)
+        return out
 
 
 class ResBlock(nn.Module):
@@ -66,7 +76,9 @@ class ResBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.relu(x + self.body(x))
+        out = F.relu(x + self.body(x))
+        _check_finite(f"ResBlock[{x.shape[1]}]", out)
+        return out
 
 
 class SceneEncoder(nn.Module):
@@ -88,10 +100,17 @@ class SceneEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, tuple[int, int]]:
         x = self.stem(x)
-        x = self.blocks(x)
+        _check_finite("SceneEncoder.stem", x)
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            x = x.to(dtype=torch.float32)
+            x = self.blocks(x)
+            x = x.to(dtype=torch.float16)  # cast back to fp16 for downstream layers
+        _check_finite("SceneEncoder.blocks", x)
         x = self.proj(x)
+        _check_finite("SceneEncoder.proj", x)
         B, C, H, W = x.shape
         tokens = x.permute(0, 2, 3, 1).reshape(B, H * W, C)
+        _check_finite("SceneEncoder.tokens", tokens)
         return tokens, (H, W)
 
 
@@ -109,9 +128,13 @@ class EdgeConvBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         edge = _edge_features(x, self.k)
+        _check_finite("EdgeConvBlock.edge", edge)
         feat = self.edge_mlp(edge)
+        _check_finite("EdgeConvBlock.edge_mlp", feat)
         feat = feat.max(dim=-1).values
-        return feat.transpose(1, 2).contiguous()
+        feat = feat.transpose(1, 2).contiguous()
+        _check_finite("EdgeConvBlock.output", feat)
+        return feat
 
 
 class DGCNNEncoder(nn.Module):
@@ -139,7 +162,10 @@ class DGCNNEncoder(nn.Module):
             x = block(x)
             multi_scale.append(x)
         x = torch.cat(multi_scale, dim=-1)
-        return self.proj(x)
+        _check_finite("DGCNNEncoder.concat", x)
+        x = self.proj(x)
+        _check_finite("DGCNNEncoder.proj", x)
+        return x
 
 
 class CrossAttentionLayer(nn.Module):
@@ -187,10 +213,16 @@ class CrossAttentionLayer(nn.Module):
         q = q_lin(q_norm(q_seq)).reshape(B, Nq, H, D).transpose(1, 2)
         k = k_lin(kv_norm(kv_seq)).reshape(B, Nk, H, D).transpose(1, 2)
         v = v_lin(kv_norm(kv_seq)).reshape(B, Nk, H, D).transpose(1, 2)
+        _check_finite("CrossAttention.q", q)
+        _check_finite("CrossAttention.k", k)
+        _check_finite("CrossAttention.v", v)
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
+        _check_finite("CrossAttention.attn", attn)
         out = (attn @ v).transpose(1, 2).reshape(B, Nq, C)
-        return out_lin(out)
+        out = out_lin(out)
+        _check_finite("CrossAttention.out", out)
+        return out
 
     def forward(self, scene, model):
         scene = scene + self._attn(
@@ -218,12 +250,15 @@ class AttentionPool(nn.Module):
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
         B = tokens.shape[0]
         t = self.norm(tokens)
+        _check_finite("AttentionPool.norm", t)
         q = self.query.expand(B, -1, -1)
         k = self.k(t)
         v = self.v(t)
         w = (q @ k.transpose(-2, -1)) * self.scale
         w = w.softmax(dim=-1)
-        return (w @ v).squeeze(1)
+        out = (w @ v).squeeze(1)
+        _check_finite("AttentionPool.out", out)
+        return out
 
 
 class HybridPool(nn.Module):
@@ -240,7 +275,10 @@ class HybridPool(nn.Module):
         max_f = tokens.max(dim=1).values
         attn_f = self.attn_pool(tokens)
         fused = torch.cat([mean_f, max_f, attn_f], dim=-1)
-        return self.norm(F.gelu(self.proj(fused)))
+        _check_finite("HybridPool.fused", fused)
+        out = self.norm(F.gelu(self.proj(fused)))
+        _check_finite("HybridPool.out", out)
+        return out
 
 
 class PoseHead(nn.Module):
@@ -275,11 +313,19 @@ class PoseHead(nn.Module):
     def forward(self, x: torch.Tensor):
         trans_feat = self.trans_mlp(x)
         rot_feat = self.rot_mlp(x)
+        _check_finite("PoseHead.trans_feat", trans_feat)
+        _check_finite("PoseHead.rot_feat", rot_feat)
         translation = self.translation_head(trans_feat)
-        rotation = rotation_6d_to_matrix(self.rotation_head(rot_feat))
+        _check_finite("PoseHead.translation", translation)
+        rotation_6d = self.rotation_head(rot_feat)
+        _check_finite("PoseHead.rotation_6d", rotation_6d)
+        rotation = rotation_6d_to_matrix(rotation_6d)
+        _check_finite("PoseHead.rotation_matrix", rotation)
         # Confidence scores bounded to [0, 1]
         confidence_t = torch.sigmoid(self.confidence_t_head(trans_feat)).squeeze(-1)  # [B]
         confidence_r = torch.sigmoid(self.confidence_r_head(rot_feat)).squeeze(-1)  # [B]
+        _check_finite("PoseHead.confidence_t", confidence_t)
+        _check_finite("PoseHead.confidence_r", confidence_r)
         return translation, rotation, confidence_t, confidence_r
 
 
@@ -356,6 +402,8 @@ class HybridPoseNet(nn.Module):
     def forward(self, depth: torch.Tensor, model_points: torch.Tensor):
         scene_tokens, (H, W) = self.scene_encoder(depth)
         model_tokens = self.model_encoder(model_points)
+        _check_finite("HybridPoseNet.scene_tokens", scene_tokens)
+        _check_finite("HybridPoseNet.model_tokens", model_tokens)
         
         # Build or use cached pos encoding based on current H, W
         key = (H, W)
@@ -367,14 +415,19 @@ class HybridPoseNet(nn.Module):
             
         scene_pos = self._pos_cache[key]
         scene_tokens = scene_tokens + scene_pos
+        _check_finite("HybridPoseNet.scene_tokens+pos", scene_tokens)
         
         model_pos = self.model_coord_proj(model_points.to(model_tokens.dtype))
         model_tokens = model_tokens + model_pos
+        _check_finite("HybridPoseNet.model_tokens+pos", model_tokens)
         for layer in self.cross_attention:
             scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
+            _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
+            _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
         scene_global = self.scene_pool(scene_tokens)
         model_global = self.model_pool(model_tokens)
         fused = torch.cat([scene_global, model_global], dim=-1)
+        _check_finite("HybridPoseNet.fused", fused)
         translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
         return {
             "translation": translation,

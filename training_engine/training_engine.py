@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 import torch
-# torch.autograd.set_detect_anomaly(True)
+
+
+def _check_finite(name: str, tensor: torch.Tensor, *, epoch: int, batch_idx: int, phase: str) -> None:
+    if not torch.isfinite(tensor).all():
+        bad_count = int((~torch.isfinite(tensor)).sum().item())
+        raise RuntimeError(
+            f"Non-finite tensor at {name} during {phase} epoch={epoch + 1} batch={batch_idx}: "
+            f"dtype={tensor.dtype}, shape={tuple(tensor.shape)}, bad_count={bad_count}"
+        )
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -264,6 +272,7 @@ class TrainingEngine:
                 with torch.amp.autocast(device_type=self.device.type, enabled=use_amp):
                     model_output = self.model(batch["depth"], batch["model_points"])
                     pred_transform = coerce_pose_output(model_output)
+                    _check_finite("pred_transform", pred_transform, epoch=epoch, batch_idx=batch_idx, phase=phase)
                     # Extract confidence predictions if available
                     pred_conf_t = model_output.get("confidence_t")
                     pred_conf_r = model_output.get("confidence_r")
