@@ -9,25 +9,31 @@
   "grad_clip_norm": 1.0,
   "resume_best": true,
   "dataset": {
-    "dataset_dir": "data/generated/dataset_v2",
+    "dataset_dir": "data/generated/dataset",
     "train_split": "train",
     "val_split": "val",
     "storage": "ram",
-    "num_points": 512,
+    "num_points": 1024,
     "depth_max_m": 9.0
   },
   "model": {
     "scene_encoder": {
-      "base_channels": 32,
+      "base_channels": 64,
       "num_blocks": 4,
-      "feature_dim": 128
+      "res_blocks_per_stride": 2,
+      "feature_dim": 256
     },
     "point_encoder": {
-      "hidden_dims": [64, 64, 128, 256],
-      "feature_dim": 128
+      "hidden_dims": [64, 128, 256, 512],
+      "feature_dim": 256,
+      "k": 32
+    },
+    "cross_attention": {
+      "num_heads": 8,
+      "num_layers": 4
     },
     "fusion": {
-      "hidden_dims": [256, 128],
+      "hidden_dims": [512, 256, 128],
       "dropout": 0.3
     }
   },

@@ -72,7 +72,7 @@ class ResBlock(nn.Module):
 class SceneEncoder(nn.Module):
     """Shallow CNN encoder for single-channel depth image."""
 
-    def __init__(self, base_channels: int = 32, num_blocks: int = 3, feature_dim: int = 128):
+    def __init__(self, base_channels: int = 32, num_blocks: int = 3, res_blocks_per_stride: int = 1, feature_dim: int = 128):
         super().__init__()
         self.stem = ConvBNReLU(1, base_channels, stride=1)
         blocks = []
@@ -80,7 +80,8 @@ class SceneEncoder(nn.Module):
         for _ in range(num_blocks):
             out_ch = min(in_ch * 2, feature_dim)
             blocks.append(ConvBNReLU(in_ch, out_ch, stride=2))
-            blocks.append(ResBlock(out_ch))
+            for _ in range(res_blocks_per_stride):
+                blocks.append(ResBlock(out_ch))
             in_ch = out_ch
         self.blocks = nn.Sequential(*blocks)
         self.proj = nn.Conv2d(in_ch, feature_dim, kernel_size=1)
@@ -116,7 +117,7 @@ class EdgeConvBlock(nn.Module):
 class DGCNNEncoder(nn.Module):
     """Dynamic Graph CNN point encoder (Wang et al., TOG 2019)."""
 
-    def __init__(self, edge_dims: tuple = (64, 64, 128, 256), feature_dim: int = 128, k: int = 20):
+    def __init__(self, edge_dims: tuple = (64, 64, 128, 256), feature_dim: int = 128, k: int = 32):
         super().__init__()
         blocks = []
         in_ch = 3
@@ -295,12 +296,13 @@ class HybridPoseNet(nn.Module):
         self.scene_encoder = SceneEncoder(
             base_channels=se_cfg.base_channels,
             num_blocks=se_cfg.num_blocks,
+            res_blocks_per_stride=se_cfg.res_blocks_per_stride,
             feature_dim=feat_dim,
         )
         self.model_encoder = DGCNNEncoder(
             edge_dims=tuple(me_cfg.hidden_dims),
             feature_dim=feat_dim,
-            k=20,
+            k=me_cfg.k,
         )
 
         in_h = int(camera_config.get("padded_height", 256))
@@ -311,7 +313,10 @@ class HybridPoseNet(nn.Module):
         scene_pos = self._build_2d_sincos_pos_encoding(token_h, token_w, feat_dim)
         self.register_buffer("scene_pos_2d", scene_pos.unsqueeze(0), persistent=True)
 
-        self.cross_attention = nn.ModuleList([CrossAttentionLayer(feat_dim, num_heads=4) for _ in range(2)])
+        self.cross_attention = nn.ModuleList(
+            [CrossAttentionLayer(feat_dim, num_heads=config.cross_attention.num_heads)
+             for _ in range(config.cross_attention.num_layers)]
+        )
         self.model_coord_proj = nn.Sequential(
             nn.Linear(3, feat_dim),
             nn.LayerNorm(feat_dim),

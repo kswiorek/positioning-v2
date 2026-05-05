@@ -17,6 +17,7 @@ def _coerce_path(value: Any) -> Path:
 class SceneEncoderConfig:
     base_channels: int = 32
     num_blocks: int = 4
+    res_blocks_per_stride: int = 1
     feature_dim: int = 128
 
     @classmethod
@@ -25,6 +26,7 @@ class SceneEncoderConfig:
         return cls(
             base_channels=int(data.get("base_channels", 32)),
             num_blocks=int(data.get("num_blocks", 4)),
+            res_blocks_per_stride=int(data.get("res_blocks_per_stride", 1)),
             feature_dim=int(data.get("feature_dim", 128)),
         )
 
@@ -33,6 +35,7 @@ class SceneEncoderConfig:
 class PointEncoderConfig:
     hidden_dims: list[int] = field(default_factory=lambda: [64, 64, 128, 256])
     feature_dim: int = 128
+    k: int = 20
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "PointEncoderConfig":
@@ -41,6 +44,21 @@ class PointEncoderConfig:
         return cls(
             hidden_dims=[int(value) for value in hidden_dims],
             feature_dim=int(data.get("feature_dim", 128)),
+            k=int(data.get("k", 20)),
+        )
+
+
+@dataclass(frozen=True)
+class CrossAttentionConfig:
+    num_heads: int = 4
+    num_layers: int = 2
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "CrossAttentionConfig":
+        data = data or {}
+        return cls(
+            num_heads=int(data.get("num_heads", 4)),
+            num_layers=int(data.get("num_layers", 2)),
         )
 
 
@@ -63,6 +81,7 @@ class FusionConfig:
 class ModelConfig:
     scene_encoder: SceneEncoderConfig = field(default_factory=SceneEncoderConfig)
     point_encoder: PointEncoderConfig = field(default_factory=PointEncoderConfig)
+    cross_attention: CrossAttentionConfig = field(default_factory=CrossAttentionConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
 
     @classmethod
@@ -71,6 +90,7 @@ class ModelConfig:
         return cls(
             scene_encoder=SceneEncoderConfig.from_dict(data.get("scene_encoder")),
             point_encoder=PointEncoderConfig.from_dict(data.get("point_encoder")),
+            cross_attention=CrossAttentionConfig.from_dict(data.get("cross_attention")),
             fusion=FusionConfig.from_dict(data.get("fusion")),
         )
 
