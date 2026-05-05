@@ -67,8 +67,8 @@ def confidence_loss(
         dict with 'loss', 'conf_t', 'conf_r' keys
     """
     # Target: confidence = exp(-temperature * error)
-    target_conf_t = torch.exp(-temperature * translation_error)
-    target_conf_r = torch.exp(-temperature * (rotation_error_deg / 180.0))
+    target_conf_t = torch.exp(-temperature * translation_error.detach())
+    target_conf_r = torch.exp(-temperature * (rotation_error_deg.detach() / 180.0))
     
     loss_t = F.mse_loss(pred_conf_t, target_conf_t)
     loss_r = F.mse_loss(pred_conf_r, target_conf_r)
@@ -130,7 +130,7 @@ def pose_loss(
     axis_weights = axis_weights / axis_weights.mean()
     translation_loss = (axis_weights * (pred_t - gt_t) ** 2).mean()
     translation_loss = torch.clamp(translation_loss, max=1e4)  # Prevent explosion
-    trans_error = torch.norm(pred_t - gt_t, dim=-1)  # [B]
+    trans_error = torch.norm(pred_t - gt_t+1e-8, dim=-1)  # [B]
 
     # ── Rotation loss (smooth SO(3) surrogate: 1 - cos(theta)) ─────────────
     # R_diff = pred_R^T @ gt_R is identity when perfect.
