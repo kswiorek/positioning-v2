@@ -134,16 +134,19 @@ class LossConfig:
     bbox_corner_weight: float = 2.0
     confidence_weight: float = 0.1
     confidence_temperature: float = 1.0
+    translation_axis_weights: list[float] = field(default_factory=lambda: [10.0, 10.0, 1.0])
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "LossConfig":
         data = data or {}
+        axis_weights = data.get("translation_axis_weights", [10.0, 10.0, 1.0])
         return cls(
             translation_weight=float(data.get("translation_weight", 1.0)),
             rotation_weight=float(data.get("rotation_weight", 0.5)),
             bbox_corner_weight=float(data.get("bbox_corner_weight", 2.0)),
             confidence_weight=float(data.get("confidence_weight", 0.1)),
             confidence_temperature=float(data.get("confidence_temperature", 1.0)),
+            translation_axis_weights=[float(w) for w in axis_weights],
         )
 
 
