@@ -126,7 +126,10 @@ def pose_loss(
 
     axis_weights = torch.as_tensor(axis_weights_cfg,
                                    device=pred_t.device, dtype=pred_t.dtype)
+    # Normalize axis weights to have mean of 1.0 to prevent scaling issues
+    axis_weights = axis_weights / axis_weights.mean()
     translation_loss = (axis_weights * (pred_t - gt_t) ** 2).mean()
+    translation_loss = torch.clamp(translation_loss, max=1e4)  # Prevent explosion
     trans_error = torch.norm(pred_t - gt_t, dim=-1)  # [B]
 
     # ── Rotation loss (smooth SO(3) surrogate: 1 - cos(theta)) ─────────────
@@ -136,15 +139,19 @@ def pose_loss(
     # especially near small angles while remaining geometry-aware on SO(3).
     R_diff = torch.bmm(pred_R.transpose(1, 2), gt_R)            # [B, 3, 3]
     trace = R_diff.diagonal(dim1=-2, dim2=-1).sum(dim=-1)      # [B]
-    cos_angle = torch.clamp((trace - 1.0) / 2.0, -1.0 + 1e-6, 1.0 - 1e-6)
+    # Clamp more aggressively to prevent numerical issues
+    cos_angle = torch.clamp((trace - 1.0) / 2.0, -0.9999, 0.9999)
     rotation_loss = (1.0 - cos_angle).mean()
-    rotation_error_deg = torch.rad2deg(torch.acos(cos_angle))
+    rotation_loss = torch.clamp(rotation_loss, max=1e4)
+    # Safe acos for rotation error logging
+    rotation_error_deg = torch.rad2deg(torch.acos(torch.clamp(cos_angle, -1.0, 1.0)))
 
     # ── BBox IoU loss ─────────────────────────────────────────────────────────
     pred_bbox = _transform_bbox_corners(bbox_corners, pred_transform)
     gt_bbox   = _transform_bbox_corners(bbox_corners, gt_transform)
     iou       = _aabb_iou(pred_bbox, gt_bbox)              # [B]
     bbox_corner_loss = (1.0 - iou).mean()
+    bbox_corner_loss = torch.clamp(bbox_corner_loss, max=1e4)
 
     # ── Combine ────────────────────────────────────────────────────────────────
     total_loss = (
@@ -152,6 +159,12 @@ def pose_loss(
         + rot_w * rotation_loss
         + bbox_w * bbox_corner_loss
     )
+    
+    # Final NaN check before returning
+    if torch.isnan(total_loss):
+        # Fallback to prevent NaN propagation
+        print("WARNING: NaN detected in pose_loss, using fallback")
+        total_loss = torch.tensor(1.0, device=pred_t.device, dtype=pred_t.dtype)
     
     result = {
         "loss": total_loss,
@@ -169,6 +182,7 @@ def pose_loss(
             temperature=conf_temp,
         )
         total_loss = total_loss + conf_w * conf_loss_dict["loss"]
+        total_loss = torch.clamp(total_loss, max=1e4)
         result["loss"] = total_loss
         result["confidence"] = conf_loss_dict["loss"].detach()
         result["confidence_t"] = conf_loss_dict["conf_t"]
