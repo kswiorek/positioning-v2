@@ -44,7 +44,7 @@ def _aabb_iou(corners1: torch.Tensor, corners2: torch.Tensor) -> torch.Tensor:
     vol1 = (max1 - min1).prod(dim=-1)
     vol2 = (max2 - min2).prod(dim=-1)
 
-    return inter_vol / (vol1 + vol2 - inter_vol + 1e-8)          # [B]
+    return inter_vol / (vol1 + vol2 - inter_vol + 1e-6)          # [B]
 
 
 def confidence_loss(
@@ -130,7 +130,7 @@ def pose_loss(
     axis_weights = axis_weights / axis_weights.mean()
     translation_loss = (axis_weights * (pred_t - gt_t) ** 2).mean()
     translation_loss = torch.clamp(translation_loss, max=1e4)  # Prevent explosion
-    trans_error = torch.norm(pred_t - gt_t+1e-8, dim=-1)  # [B]
+    trans_error = torch.norm(pred_t - gt_t+1e-6, dim=-1)  # [B]
 
     # ── Rotation loss (smooth SO(3) surrogate: 1 - cos(theta)) ─────────────
     # R_diff = pred_R^T @ gt_R is identity when perfect.
@@ -187,5 +187,6 @@ def pose_loss(
         # Fallback to prevent NaN propagation
         print("WARNING: NaN detected in pose_loss, using fallback")
         total_loss = (pred_transform*0).sum() + (pred_conf_t*0).sum() if pred_conf_t is not None else (pred_transform*0).sum()
+        result["loss"] = total_loss
     
     return result
