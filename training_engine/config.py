@@ -174,6 +174,7 @@ class DatasetConfig:
     train_split: str = "train"
     val_split: str = "val"
     storage: str = "ram"
+    cache_file: Path | None = None
     num_points: int = 0
     depth_max_m: float = 5.0
 
@@ -189,6 +190,7 @@ class DatasetConfig:
             train_split=str(data.get("train_split", "train")),
             val_split=str(data.get("val_split", "val")),
             storage=storage,
+            cache_file=None if data.get("cache_file") in (None, "") else _coerce_path(data.get("cache_file")),
             num_points=int(data.get("num_points", 0)),
             depth_max_m=float(data.get("depth_max_m", 5.0)),
         )

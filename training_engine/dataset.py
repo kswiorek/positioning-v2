@@ -106,9 +106,37 @@ class PoseDataset(Dataset):
         self.storage = dataset_cfg.storage
         self._depths: np.ndarray | None = None
         self._model_points: np.ndarray | None = None
+        self._cache_path: Path | None = None
+
+        # Resolve cache path from config (relative to split_dir when not absolute)
+        if getattr(self.dataset_cfg, "cache_file", None):
+            cp = Path(self.dataset_cfg.cache_file)
+            if not cp.is_absolute():
+                cp = self.split_dir / cp
+            self._cache_path = cp
 
         if self.storage == "ram":
-            self._preload_split()
+            # Try load from cache if provided
+            if self._cache_path is not None and self._cache_path.exists():
+                try:
+                    with np.load(self._cache_path, allow_pickle=False) as arc:
+                        depths = arc["depths"]
+                        model_points = arc["model_points"]
+                    # Validate shapes
+                    if depths.shape[0] != len(self.records) or model_points.shape[0] != len(self.records):
+                        # Cache mismatch; rebuild
+                        self._preload_split()
+                        self._save_cache()
+                    else:
+                        self._depths = np.asarray(depths, dtype=np.float32, copy=False)
+                        self._model_points = np.asarray(model_points, dtype=np.float32, copy=False)
+                except Exception:
+                    # If cache is corrupt or incompatible, rebuild it
+                    self._preload_split()
+                    self._save_cache()
+            else:
+                self._preload_split()
+                self._save_cache()
 
     def _preload_split(self) -> None:
         try:
@@ -148,6 +176,21 @@ class PoseDataset(Dataset):
                 
                 self._depths[i] = depth
                 self._model_points[i] = model_points
+
+    def _save_cache(self) -> None:
+        """Save preloaded arrays to the configured cache path (if any)."""
+        if self._cache_path is None:
+            return
+        try:
+            self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+            # Save as an uncompressed .npz archive containing two arrays
+            np.savez(str(self._cache_path), depths=self._depths, model_points=self._model_points)
+        except Exception:
+            # Don't fail training because of cache save errors; just warn
+            try:
+                print(f"Warning: failed to write dataset cache to {self._cache_path}")
+            except Exception:
+                pass
 
     def __len__(self) -> int:
         return len(self.records)

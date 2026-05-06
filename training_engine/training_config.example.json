@@ -19,6 +19,7 @@
     "train_split": "train",
     "val_split": "val",
     "storage": "ram",
+    "cache_file": "cache/train_split_cache.npz",
     "num_points": 1024,
     "depth_max_m": 9.0
   },
@@ -44,14 +45,14 @@
     }
   },
   "optimizer": {
-    "learning_rate": 0.0001,
+    "learning_rate": 0.001,
     "weight_decay": 0.0001
   },
   "scheduler": {
     "type": "cosine_warm_restarts",
     "min_learning_rate": 1e-7,
     "restart_period": 50,
-    "warmup_epochs": 5
+    "warmup_epochs": 10
   },
   "loss": {
     "translation_weight": 7.0,
