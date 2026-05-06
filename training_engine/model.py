@@ -104,12 +104,10 @@ class SceneEncoder(nn.Module):
         with torch.autocast(device_type=x.device.type, enabled=False):
             x = x.to(dtype=torch.float32)
             x = self.blocks(x)
-            x = x.to(dtype=torch.float16)  # cast back to fp16 for downstream layers
-        _check_finite("SceneEncoder.blocks", x)
-        x = self.proj(x)
-        _check_finite("SceneEncoder.proj", x)
-        B, C, H, W = x.shape
-        tokens = x.permute(0, 2, 3, 1).reshape(B, H * W, C)
+            x = self.proj(x)
+            B, C, H, W = x.shape
+            tokens = x.permute(0, 2, 3, 1).reshape(B, H * W, C)
+        tokens = tokens.to(dtype=torch.float16)  # cast back to fp16 for downstream layers
         _check_finite("SceneEncoder.tokens", tokens)
         return tokens, (H, W)
 
