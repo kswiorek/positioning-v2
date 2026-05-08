@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from data_engine.camera import create_camera_backend
-from data_engine.composition import PlacementConstraints, fit_plane_from_depth, sample_pose_on_plane
+from data_engine.composition import PlacementConstraints, fit_plane_from_depth, sample_pose_from_camera
 from data_engine.capture import BackgroundCaptureSession, CaptureConfig
 from data_engine.generators import generate_mixed_canonical_model
 
@@ -89,6 +89,7 @@ class DataEngine:
         save_components = bool(dataset_cfg.get("save_components", False))
         compressed_npz = bool(dataset_cfg.get("compressed_npz", False))
         max_attempts_per_sample = max(int(dataset_cfg.get("max_attempts_per_sample", 20)), 1)
+        stl_chunk_size = max(int(dataset_cfg.get("stl_chunk_size", 32)), 1)
         base_seed = int(dataset_cfg.get("seed", self.config.seed))
 
         output_root = Path(dataset_cfg.get("output_dir", str(self.config.output_dir)))
@@ -130,6 +131,7 @@ class DataEngine:
                 debug_metadata=bool(debug_metadata),
                 save_components=bool(save_components),
                 compressed_npz=bool(compressed_npz),
+                stl_chunk_size=int(stl_chunk_size),
                 max_attempts_per_sample=int(max_attempts_per_sample),
             )
             split_summaries[split_name] = summary
@@ -191,18 +193,19 @@ class DataEngine:
 
         placement_cfg = scene_config["placement"]
         constraints = PlacementConstraints(
-            min_plane_distance_m=float(placement_cfg["min_plane_distance_m"]),
-            max_plane_distance_m=float(placement_cfg["max_plane_distance_m"]),
+            min_camera_distance_m=float(placement_cfg["min_camera_distance_m"]),
+            max_camera_distance_m=float(placement_cfg["max_camera_distance_m"]),
         )
 
         rng = np.random.default_rng(seed_value)
-        placement = sample_pose_on_plane(
-            plane=plane,
+        placement = sample_pose_from_camera(
             camera_cfg=scene_config["camera"],
             bbox_extent_m=bbox_extent,
             constraints=constraints,
             rng=rng,
             max_tries=int(placement_cfg.get("max_attempts", 400)),
+            center_margin_ratio=float(placement_cfg.get("center_margin_ratio_core", 0.12)),
+            allow_edge_sampling=bool(placement_cfg.get("allow_edge_sampling", False)),
         )
 
         return {

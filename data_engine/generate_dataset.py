@@ -22,7 +22,7 @@ from data_engine.composition.camera_artifacts import apply_camera_artifacts
 from data_engine.composition.depth_compositor import compose_depth, render_mesh_depth, transform_mesh
 from data_engine.composition.plane_fit import fit_plane_from_depth
 from data_engine.composition.plane_placement import PlacementConstraints
-from data_engine.composition.placement_sampling import sample_pose_on_plane
+from data_engine.composition.placement_sampling import sample_pose_from_camera
 from data_engine.generators import generate_superquadric_canonical_model
 from data_engine.generators.mixed import choose_object_source
 from data_engine.generators.stl import build_stl_canonical_model_from_cache, preload_stl_asset_chunk
@@ -40,6 +40,7 @@ class SamplePlan:
     split: str
     source: str
     shape_seed: int
+    allow_truncation: bool
     stl_path: str | None = None
     stl_chunk_id: int | None = None
 
@@ -152,6 +153,7 @@ def _build_sample_plan(
     stl_available: bool,
     stl_chunk_size: int,
     source_override: str,
+    allow_truncation: bool,
 ) -> SamplePlan:
     sample_seed = _seed_for_sample(base_seed, sample_index, 0)
     rng = np.random.default_rng(sample_seed)
@@ -180,9 +182,52 @@ def _build_sample_plan(
         split=split,
         source=source,
         shape_seed=shape_seed,
+        allow_truncation=allow_truncation,
         stl_path=stl_path,
         stl_chunk_id=stl_chunk_id,
     )
+
+
+def _compute_object_view_metrics(object_depth: np.ndarray) -> dict[str, float | int | bool]:
+    valid_mask = np.isfinite(object_depth) & (object_depth > 0.0)
+    visible_pixels = int(np.count_nonzero(valid_mask))
+    h, w = object_depth.shape
+    total_pixels = max(int(h * w), 1)
+    if visible_pixels <= 0:
+        return {
+            "visible_pixels": 0,
+            "pixel_coverage": 0.0,
+            "bbox_width_px": 0,
+            "bbox_height_px": 0,
+            "bbox_min_dimension_px": 0,
+            "border_touch_pixels": 0,
+            "border_touch_ratio": 0.0,
+            "touches_border": False,
+        }
+
+    ys, xs = np.nonzero(valid_mask)
+    x_min, x_max = int(xs.min()), int(xs.max())
+    y_min, y_max = int(ys.min()), int(ys.max())
+    bbox_width = x_max - x_min + 1
+    bbox_height = y_max - y_min + 1
+
+    border_mask = np.zeros_like(valid_mask, dtype=bool)
+    border_mask[0, :] = True
+    border_mask[-1, :] = True
+    border_mask[:, 0] = True
+    border_mask[:, -1] = True
+    border_touch_pixels = int(np.count_nonzero(valid_mask & border_mask))
+
+    return {
+        "visible_pixels": visible_pixels,
+        "pixel_coverage": float(visible_pixels / total_pixels),
+        "bbox_width_px": int(bbox_width),
+        "bbox_height_px": int(bbox_height),
+        "bbox_min_dimension_px": int(min(bbox_width, bbox_height)),
+        "border_touch_pixels": border_touch_pixels,
+        "border_touch_ratio": float(border_touch_pixels / max(visible_pixels, 1)),
+        "touches_border": bool(border_touch_pixels > 0),
+    }
 
 
 def _generate_sample_from_plan(
@@ -295,19 +340,20 @@ def _generate_sample_from_plan(
         model_points = np.asarray(model_cloud.points, dtype=np.float32)
 
         constraints = PlacementConstraints(
-            min_plane_distance_m=float(place_cfg["min_plane_distance_m"]),
-            max_plane_distance_m=float(place_cfg["max_plane_distance_m"]),
+            min_camera_distance_m=float(place_cfg["min_camera_distance_m"]),
+            max_camera_distance_m=float(place_cfg["max_camera_distance_m"]),
         )
 
         place_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))
         try:
-            placement = sample_pose_on_plane(
-                plane=plane,
+            placement = sample_pose_from_camera(
                 camera_cfg=camera_cfg,
                 bbox_extent_m=bbox_extent,
                 constraints=constraints,
                 rng=place_rng,
                 max_tries=int(place_cfg.get("max_attempts", 400)),
+                center_margin_ratio=float(place_cfg.get("center_margin_ratio_core", 0.12)),
+                allow_edge_sampling=bool(plan.allow_truncation),
             )
         except RuntimeError:
             continue
@@ -319,6 +365,27 @@ def _generate_sample_from_plan(
         )
 
         object_depth = render_mesh_depth(mesh_world, camera_cfg)
+        view_metrics = _compute_object_view_metrics(object_depth)
+
+        min_pixel_coverage = float(place_cfg.get("min_pixel_coverage", 0.10))
+        max_pixel_coverage = float(place_cfg.get("max_pixel_coverage", 0.95))
+        min_bbox_dimension_px = int(place_cfg.get("min_bbox_dimension_px", 20))
+        max_border_touch_ratio_core = float(place_cfg.get("max_border_touch_ratio_core", 0.10))
+
+        if not (min_pixel_coverage <= float(view_metrics["pixel_coverage"]) <= max_pixel_coverage):
+            continue
+        if int(view_metrics["bbox_min_dimension_px"]) < min_bbox_dimension_px:
+            continue
+        # Truncated samples are best-effort: require border touch in early tries, then
+        # relax to avoid disproportionately high late-stage generation failures.
+        require_truncated = bool(plan.allow_truncation) and attempt < max(max_attempts_per_sample // 2, 1)
+        if require_truncated:
+            if not bool(view_metrics["touches_border"]):
+                continue
+        elif not plan.allow_truncation:
+            if float(view_metrics["border_touch_ratio"]) >= max_border_touch_ratio_core:
+                continue
+
         composite_depth = compose_depth(background_depth, object_depth)
 
         artifacts_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))
@@ -365,6 +432,7 @@ def _generate_sample_from_plan(
             "synthetic_object",
             "real_background_composite",
             f"object_source:{shape_params.get('object_source', 'unknown')}",
+            "visibility:truncated" if plan.allow_truncation else "visibility:core",
         ]
 
         metadata = {
@@ -405,7 +473,9 @@ def _generate_sample_from_plan(
                 "orientation_quat_xyzw": placement.orientation_quat_xyzw.tolist(),
                 "plane_offset_m": float(placement.plane_offset_m),
                 "center_pixel_uv": placement.center_pixel_uv.tolist(),
+                "allow_truncation": bool(plan.allow_truncation),
             },
+            "object_view_metrics": view_metrics,
             "background_normalization": {
                 "enabled": norm_enabled,
                 "transform": None
@@ -503,10 +573,30 @@ def build_dataset(
         stl_chunk_size = 1
 
     _load_background_cache(scene_cfg, background_paths, max_backgrounds_in_ram)
+    place_cfg = scene_cfg.get("placement", {})
 
     stl_files = _list_stl_files(scene_cfg)
     stl_chunk_size = min(stl_chunk_size, max(len(stl_files), 1))
     stl_available = bool(stl_files)
+
+    truncated_fraction_min = float(place_cfg.get("truncated_fraction_min", 0.10))
+    truncated_fraction_max = float(place_cfg.get("truncated_fraction_max", 0.20))
+    truncated_fraction_min = float(np.clip(truncated_fraction_min, 0.0, 1.0))
+    truncated_fraction_max = float(np.clip(truncated_fraction_max, 0.0, 1.0))
+    if truncated_fraction_max < truncated_fraction_min:
+        truncated_fraction_min, truncated_fraction_max = truncated_fraction_max, truncated_fraction_min
+    split_rng = np.random.default_rng(int(base_seed + 917623))
+    target_truncated_fraction = float(
+        split_rng.uniform(truncated_fraction_min, truncated_fraction_max)
+        if truncated_fraction_max > truncated_fraction_min
+        else truncated_fraction_min
+    )
+    target_truncated_count = int(round(num_samples * target_truncated_fraction))
+    target_truncated_count = max(0, min(target_truncated_count, num_samples))
+    truncation_indices = set(
+        int(i)
+        for i in split_rng.choice(num_samples, size=target_truncated_count, replace=False)
+    )
 
     sample_plans: list[SamplePlan] = []
     superquadric_plans: list[SamplePlan] = []
@@ -521,6 +611,7 @@ def build_dataset(
             stl_available=stl_available,
             stl_chunk_size=stl_chunk_size,
             source_override=object_source,
+            allow_truncation=sample_index in truncation_indices,
         )
         sample_plans.append(plan)
         if plan.source == "stl" and plan.stl_chunk_id is not None:

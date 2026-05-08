@@ -81,23 +81,33 @@ def _resolve_npz_path(split_dir: Path, row: dict) -> Path:
 
 
 def _load_records(dataset_root: Path, split: str | None) -> list[dict]:
+    def _build_record(split_dir: Path, row: dict) -> dict | None:
+        try:
+            depth_npz = _resolve_npz_path(split_dir, row)
+        except (FileNotFoundError, KeyError):
+            # Skip failed/incomplete metadata rows that do not have a materialized sample file.
+            return None
+        return {
+            "split_dir": split_dir,
+            "sample_id": str(row["sample_id"]),
+            "split": str(row.get("split", split_dir.name)),
+            "sample_seed": int(row.get("sample_seed", 0)),
+            "depth_npz": depth_npz,
+            "gt_transform_camera_from_object": np.asarray(row["gt_transform_camera_from_object"], dtype=np.float32),
+            "object_source": str(row.get("object_source", "unknown")),
+        }
+
     if split:
         split_dir = dataset_root / split
         metadata_path = split_dir / "metadata.jsonl"
         if not metadata_path.exists():
             raise FileNotFoundError(f"Missing metadata file: {metadata_path}")
-        return [
-            {
-                "split_dir": split_dir,
-                "sample_id": str(row["sample_id"]),
-                "split": str(row.get("split", split_dir.name)),
-                "sample_seed": int(row.get("sample_seed", 0)),
-                "depth_npz": _resolve_npz_path(split_dir, row),
-                "gt_transform_camera_from_object": np.asarray(row["gt_transform_camera_from_object"], dtype=np.float32),
-                "object_source": str(row.get("object_source", "unknown")),
-            }
-            for row in _read_jsonl(metadata_path)
-        ]
+        records: list[dict] = []
+        for row in _read_jsonl(metadata_path):
+            rec = _build_record(split_dir, row)
+            if rec is not None:
+                records.append(rec)
+        return records
 
     records: list[dict] = []
     for metadata_path in dataset_root.rglob("metadata.jsonl"):
@@ -107,17 +117,9 @@ def _load_records(dataset_root: Path, split: str | None) -> list[dict]:
         except FileNotFoundError:
             continue
         for row in rows:
-            records.append(
-                {
-                    "split_dir": split_dir,
-                    "sample_id": str(row["sample_id"]),
-                    "split": str(row.get("split", split_dir.name)),
-                    "sample_seed": int(row.get("sample_seed", 0)),
-                    "depth_npz": _resolve_npz_path(split_dir, row),
-                    "gt_transform_camera_from_object": np.asarray(row["gt_transform_camera_from_object"], dtype=np.float32),
-                    "object_source": str(row.get("object_source", "unknown")),
-                }
-            )
+            rec = _build_record(split_dir, row)
+            if rec is not None:
+                records.append(rec)
     return records
 
 

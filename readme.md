@@ -19,7 +19,7 @@ Updated version of the pose estimator project
 Run split-aware generation from workspace root:
 
 ```bash
-python -m data_engine.generate_dataset --scene_config data_engine/config/scene_config.superquadric.example.json --dataset_config data_engine/config/dataset_config.example.json
+python -m data_engine.generate_dataset --scene_config data_engine/config/scene_config.json --dataset_config data_engine/config/dataset_config.json
 ```
 
 The generator writes:

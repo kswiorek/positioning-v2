@@ -33,16 +33,16 @@
     "source_selection": {
       "mode": "random",
       "weights": {
-        "superquadric": 0.2,
-        "stl": 0.8
+        "superquadric": 1.0,
+        "stl": 0.0
       }
     },
     "superquadric": {
       "base_length_m": 1.0,
-      "length_scale_range": [0.8, 1.2],
+      "length_scale_range": [12.0, 22.0],
       "cross_section": {
-        "major_axis_range": [0.06, 0.12],
-        "minor_axis_range": [0.04, 0.08],
+        "major_axis_range": [0.2, 1.5],
+        "minor_axis_range": [0.05, 0.20],
         "min_aspect_ratio": 1.2
       },
       "taper_ratio_range": [1.0, 1.5],
@@ -60,7 +60,7 @@
         "glob": "*.stl"
       },
       "normalization": {
-        "max_aabb_dimension_range_m": [0.3, 0.8]
+        "max_aabb_dimension_range_m": [12.0, 22.0]
       },
       "points": {
         "sample_count": 5000
@@ -69,9 +69,16 @@
   },
 
   "placement": {
-    "min_plane_distance_m": 0.9,
-    "max_plane_distance_m": 1.5,
-    "max_attempts": 400
+    "min_camera_distance_m": 0.5,
+    "max_camera_distance_m": 2.5,
+    "max_attempts": 400,
+    "center_margin_ratio_core": 0.12,
+    "min_pixel_coverage": 0.1,
+    "max_pixel_coverage": 0.95,
+    "min_bbox_dimension_px": 20,
+    "max_border_touch_ratio_core": 0.1,
+    "truncated_fraction_min": 0.1,
+    "truncated_fraction_max": 0.2
   },
 
   "camera_artifacts": {
@@ -103,14 +110,14 @@
       "interaction_radius_px": 2,
       "min_depth_m": 1e-6,
       "abs_threshold_m": 0.35,
-      "rel_threshold": 0.1,
+      "rel_threshold": 0.8,
       "threshold_mode": "or",
       "border_radius_px": 1,
       "connectivity": 8
     },
     "normal_confidence_falloff": {
       "enabled": true,
-      "angle_center_deg": 70.0,
+      "angle_center_deg": 80.0,
       "angle_span_deg": 20.0,
       "drop_prob_max": 0.75,
       "structured_dropout": true,

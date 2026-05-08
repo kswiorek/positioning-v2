@@ -10,8 +10,8 @@ import numpy as np
 
 @dataclass
 class PlacementConstraints:
-    min_plane_distance_m: float
-    max_plane_distance_m: float
+    min_camera_distance_m: float
+    max_camera_distance_m: float
 
 
 def is_camera_inside_aabb(camera_xyz: np.ndarray, aabb_min: np.ndarray, aabb_max: np.ndarray) -> bool:
@@ -32,4 +32,4 @@ def center_projects_inside_fov(center_cam: np.ndarray, fx: float, fy: float, cx:
 
 def sample_plane_offset_distance(rng: np.random.Generator, constraints: PlacementConstraints) -> float:
     """Sample object offset distance in front of fitted plane."""
-    return float(rng.uniform(constraints.min_plane_distance_m, constraints.max_plane_distance_m))
+    return float(rng.uniform(constraints.min_camera_distance_m, constraints.max_camera_distance_m))

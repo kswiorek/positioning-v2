@@ -97,3 +97,68 @@ def sample_pose_on_plane(
         )
 
     raise RuntimeError("Failed to sample a valid placement under current constraints.")
+
+
+def sample_pose_from_camera(
+    camera_cfg: dict,
+    bbox_extent_m: np.ndarray,
+    constraints: PlacementConstraints,
+    rng: np.random.Generator,
+    max_tries: int = 400,
+    center_margin_ratio: float = 0.12,
+    allow_edge_sampling: bool = False,
+) -> PlacementSample:
+    """Sample a valid object pose directly from camera frame constraints."""
+    fx, fy, cx, cy, width, height = intrinsics_from_camera_config(camera_cfg)
+    bbox_extent_m = np.asarray(bbox_extent_m, dtype=np.float64)
+    center_margin_ratio = float(np.clip(center_margin_ratio, 0.0, 0.45))
+
+    if allow_edge_sampling:
+        u_min, u_max = 0.0, float(width - 1.0)
+        v_min, v_max = 0.0, float(height - 1.0)
+    else:
+        u_margin = center_margin_ratio * float(width - 1.0)
+        v_margin = center_margin_ratio * float(height - 1.0)
+        u_min, u_max = u_margin, float(width - 1.0) - u_margin
+        v_min, v_max = v_margin, float(height - 1.0) - v_margin
+
+    if u_max <= u_min or v_max <= v_min:
+        raise RuntimeError("Invalid camera-center sampling bounds after margin application.")
+
+    for _ in range(max_tries):
+        u = float(rng.uniform(u_min, u_max))
+        v = float(rng.uniform(v_min, v_max))
+        ray = _ray_from_pixel(u, v, fx, fy, cx, cy)
+
+        # Reuse placement distance constraints as camera-center distance range.
+        center = ray * sample_plane_offset_distance(rng, constraints)
+
+        if not center_projects_inside_fov(center, fx, fy, cx, cy, width, height):
+            continue
+
+        euler = np.array([
+            rng.uniform(-180.0, 180.0),
+            rng.uniform(-180.0, 180.0),
+            rng.uniform(-180.0, 180.0),
+        ])
+        rot = Rotation.from_euler("xyz", euler, degrees=True)
+        rot_mat = rot.as_matrix()
+
+        camera_local = rot_mat.T @ (-center)
+        if is_camera_inside_aabb(
+            camera_local,
+            -0.5 * bbox_extent_m,
+            0.5 * bbox_extent_m,
+        ):
+            continue
+
+        quat = rot.as_quat()  # [x, y, z, w]
+        return PlacementSample(
+            position_xyz=center,
+            orientation_euler_deg_xyz=euler,
+            orientation_quat_xyzw=quat,
+            plane_offset_m=float(np.linalg.norm(center)),
+            center_pixel_uv=np.array([u, v], dtype=np.float64),
+        )
+
+    raise RuntimeError("Failed to sample a valid camera-based placement under current constraints.")

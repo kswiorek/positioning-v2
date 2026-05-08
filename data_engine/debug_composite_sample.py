@@ -97,8 +97,8 @@ def main() -> None:
 
     place_cfg = scene_cfg["placement"]
     constraints = PlacementConstraints(
-        min_plane_distance_m=float(place_cfg["min_plane_distance_m"]),
-        max_plane_distance_m=float(place_cfg["max_plane_distance_m"]),
+        min_camera_distance_m=float(place_cfg["min_camera_distance_m"]),
+        max_camera_distance_m=float(place_cfg["max_camera_distance_m"]),
     )
 
     place_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))

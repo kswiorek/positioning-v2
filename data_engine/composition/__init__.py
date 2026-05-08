@@ -13,7 +13,7 @@ from .plane_placement import (
     is_camera_inside_aabb,
     sample_plane_offset_distance,
 )
-from .placement_sampling import PlacementSample, sample_pose_on_plane
+from .placement_sampling import PlacementSample, sample_pose_from_camera, sample_pose_on_plane
 
 __all__ = [
     "BackgroundTransformParams",
@@ -30,5 +30,6 @@ __all__ = [
     "center_projects_inside_fov",
     "is_camera_inside_aabb",
     "sample_plane_offset_distance",
+    "sample_pose_from_camera",
     "sample_pose_on_plane",
 ]
