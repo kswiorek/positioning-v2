@@ -99,10 +99,10 @@ class SceneEncoder(nn.Module):
         self.proj = nn.Conv2d(in_ch, feature_dim, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, tuple[int, int]]:
-        x = self.stem(x)
-        _check_finite("SceneEncoder.stem", x)
         with torch.autocast(device_type=x.device.type, enabled=False):
-            x = x.to(dtype=torch.float32)
+            x = self.stem(x)
+            _check_finite("SceneEncoder.stem", x)
+            # x = x.to(dtype=torch.float32)
             x = self.blocks(x)
             x = self.proj(x)
             B, C, H, W = x.shape
@@ -274,7 +274,10 @@ class HybridPool(nn.Module):
         attn_f = self.attn_pool(tokens)
         fused = torch.cat([mean_f, max_f, attn_f], dim=-1)
         _check_finite("HybridPool.fused", fused)
-        out = self.norm(F.gelu(self.proj(fused)))
+        with torch.autocast(device_type=fused.device.type, enabled=False):
+            fused = fused.to(dtype=torch.float32)
+            out = self.norm(F.gelu(self.proj(fused)))
+            out = out.to(dtype=tokens.dtype)
         _check_finite("HybridPool.out", out)
         return out
 

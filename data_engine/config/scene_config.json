@@ -24,6 +24,24 @@
     "out_of_plane_range_m": [0.0, 1.0]
   },
 
+  "background_sources": {
+    "weights": {
+      "real": 0.5,
+      "perlin": 0.25,
+      "blank": 0.25
+    },
+    "perlin": {
+      "base_depth_m_range": [2.0, 3.5],
+      "amplitude_m_range": [0.08, 0.25],
+      "noise_scale_range": [1.8, 3.5],
+      "octaves_range": [3, 5],
+      "persistence": 0.5
+    },
+    "blank": {
+      "depth_value_m": 0.0
+    }
+  },
+
   "plane_fit": {
     "stride": 2,
     "middle_percentile": 0.8
@@ -33,8 +51,8 @@
     "source_selection": {
       "mode": "random",
       "weights": {
-        "superquadric": 1.0,
-        "stl": 0.0
+        "superquadric": 0.2,
+        "stl": 0.8
       }
     },
     "superquadric": {
@@ -56,7 +74,7 @@
     },
     "stl": {
       "input": {
-        "directory": "data/stl_processed",
+        "directory": "data/stl_glider",
         "glob": "*.stl"
       },
       "normalization": {

@@ -214,6 +214,7 @@ class TrainingConfig:
     grad_clip_norm: float = 1.0
     resume_from: Path | None = None
     resume_best: bool = False
+    resume_latest: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainingConfig":
@@ -235,4 +236,5 @@ class TrainingConfig:
             grad_clip_norm=float(data.get("grad_clip_norm", 1.0)),
             resume_from=None if resume_from in (None, "") else _coerce_path(resume_from),
             resume_best=bool(data.get("resume_best", False)),
+            resume_latest=bool(data.get("resume_latest", False)),
         )

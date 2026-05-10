@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ class SampleRecord:
     gt_transform_camera_from_object: np.ndarray
     bbox_corners_m: np.ndarray
     object_source: str
+    object_name: str
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -81,16 +83,26 @@ def load_split_records(split_dir: Path) -> list[SampleRecord]:
                 ),
                 bbox_corners_m=np.asarray(bbox_corners, dtype=np.float32),
                 object_source=str(row.get("object_source", "unknown")),
+                object_name=str(
+                    row.get("object_id")
+                    or Path(str(row.get("object_asset_path", ""))).stem
+                    or row.get("object_source", "unknown")
+                ),
             )
         )
     return records
 
 
-def _sample_model_points(model_points: np.ndarray, sample_seed: int, num_points: int) -> np.ndarray:
+def _seed_from_object_name(object_name: str) -> int:
+    digest = hashlib.sha1(object_name.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="little", signed=False) & 0x7FFFFFFF
+
+
+def _sample_model_points(model_points: np.ndarray, object_name: str, num_points: int) -> np.ndarray:
     if num_points <= 0 or len(model_points) == num_points:
         return model_points.astype(np.float32, copy=False)
 
-    rng = np.random.default_rng(sample_seed)
+    rng = np.random.default_rng(_seed_from_object_name(object_name))
     replace = len(model_points) < num_points
     indices = rng.choice(len(model_points), size=num_points, replace=replace)
     return model_points[indices].astype(np.float32, copy=False)
@@ -165,7 +177,7 @@ class PoseDataset(Dataset):
                     raise KeyError(f"Sample {record.sample_id} does not contain model_points")
                 model_points = _sample_model_points(
                     np.asarray(sample["model_points"], dtype=np.float32),
-                    sample_seed=record.sample_seed,
+                    object_name=record.object_name,
                     num_points=self.dataset_cfg.num_points,
                 )
                 
@@ -220,7 +232,7 @@ class PoseDataset(Dataset):
                     raise KeyError(f"Sample {record.sample_id} does not contain model_points")
                 model_points = _sample_model_points(
                     np.asarray(sample["model_points"], dtype=np.float32),
-                    sample_seed=record.sample_seed,
+                    object_name=record.object_name,
                     num_points=self.dataset_cfg.num_points,
                 )
 
@@ -243,14 +255,20 @@ def build_dataloaders(config: TrainingConfig) -> tuple[DataLoader, DataLoader]:
     generator = torch.Generator()
     generator.manual_seed(config.seed)
 
+    # Use an explicit RandomSampler so sampling order is randomized every epoch
+    # (and reproducible given the configured seed).
+    from torch.utils.data import RandomSampler
+
+    train_sampler = RandomSampler(train_dataset, replacement=False, generator=generator)
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
-        shuffle=True,
+        shuffle=False,
+        sampler=train_sampler,
         num_workers=config.num_workers,
         pin_memory=config.pin_memory,
         drop_last=False,
-        generator=generator,
     )
     val_loader = DataLoader(
         val_dataset,

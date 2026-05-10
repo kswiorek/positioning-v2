@@ -34,7 +34,7 @@ try:
     from .config import TrainingConfig
     from .dataset import build_dataloaders
     from .geometry import coerce_pose_output
-    from .losses import PoseLossWeights, pose_loss
+    from .losses import pose_loss
     from .model import build_model
 except Exception:  # pragma: no cover - fallback for direct script execution
     import sys
@@ -44,7 +44,7 @@ except Exception:  # pragma: no cover - fallback for direct script execution
     from training_engine.config import TrainingConfig
     from training_engine.dataset import build_dataloaders
     from training_engine.geometry import coerce_pose_output
-    from training_engine.losses import PoseLossWeights, pose_loss
+    from training_engine.losses import pose_loss
     from training_engine.model import build_model
 
 
@@ -89,6 +89,7 @@ class TrainingEngine:
         self.checkpoint_dir = self.run_dir / "checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.run_dir / "training_log.csv"
+        self.high_loss_samples_path = self.run_dir / "high_loss_samples.txt"
         self.monitoring = config.monitoring
         self.device = torch.device(config.device if torch.cuda.is_available() or config.device != "cuda" else "cpu")
 
@@ -104,11 +105,7 @@ class TrainingEngine:
         )
         self.scheduler = self._build_scheduler()
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.device.type == "cuda")
-        self.loss_weights = PoseLossWeights(
-            translation_weight=config.loss.translation_weight,
-            rotation_weight=config.loss.rotation_weight,
-            bbox_corner_weight=config.loss.bbox_corner_weight,
-        )
+        self.loss_weights = config.loss
         self.best_val_loss = math.inf
         self.start_epoch = 0
         self.global_step = 0
@@ -125,6 +122,10 @@ class TrainingEngine:
             best_checkpoint = self.checkpoint_dir / "best.pth"
             if best_checkpoint.exists():
                 load_and_resume(self, best_checkpoint)
+        elif self.config.resume_latest:
+            latest_checkpoint = self.checkpoint_dir / "latest.pth"
+            if latest_checkpoint.exists():
+                load_and_resume(self, latest_checkpoint)
 
     def _write_config_snapshot(self) -> None:
         snapshot = {
@@ -232,12 +233,13 @@ class TrainingEngine:
         for key, value in metrics.items():
             self.writer.add_scalar(f"{phase}/{key}", value, step)
 
-    def _move_batch(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
+    def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         return {
             "depth": batch["depth"].to(self.device, non_blocking=True),
             "model_points": batch["model_points"].to(self.device, non_blocking=True),
             "gt_transform": batch["gt_transform"].to(self.device, non_blocking=True),
             "bbox_corners": batch["bbox_corners"].to(self.device, non_blocking=True),
+            "sample_id": batch.get("sample_id"),  # Keep sample IDs for debugging
         }
 
     def _run_epoch(
@@ -284,6 +286,13 @@ class TrainingEngine:
                         pred_conf_r=pred_conf_r,
                         weights=self.loss_weights,
                     )
+                    
+                        # Log anomalously high loss samples to file
+                    batch_loss = float(loss_dict["loss"].detach().cpu())
+                    if batch_loss > 100:
+                        sample_ids = batch.get("sample_id")
+                        with self.high_loss_samples_path.open("a", encoding="utf-8") as f:
+                            f.write(f"epoch={epoch + 1} batch={batch_idx} phase={phase} loss={batch_loss:.2f} samples={sample_ids}\n")
 
                 if train:
                     self.optimizer.zero_grad(set_to_none=True)
@@ -342,6 +351,7 @@ class TrainingEngine:
                             flush=True,
                         )
                         self._append_log_row(quick_row)
+                        self.model.train(mode=True)
 
                 if max_batches is not None and batch_idx >= max_batches:
                     break
