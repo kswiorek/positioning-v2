@@ -6,3 +6,4 @@ data/generated/*
 data/stl/*
 data/stl_processed/*
 data/generated/dataset/*
+runs/**/tensorboard/*
