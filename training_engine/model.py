@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import ModelConfig, TrainingConfig
+from .config import ModelConfig, SegmentationConfig, TrainingConfig
 from .geometry import rotation_6d_to_matrix
 
 
@@ -245,22 +245,35 @@ class AttentionPool(nn.Module):
         self.v = nn.Linear(dim, dim, bias=False)
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        B = tokens.shape[0]
+    def forward(self, tokens: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        B, N, _ = tokens.shape
         t = self.norm(tokens)
         _check_finite("AttentionPool.norm", t)
         q = self.query.expand(B, -1, -1)
         k = self.k(t)
         v = self.v(t)
         w = (q @ k.transpose(-2, -1)) * self.scale
+        if mask is not None:
+            w = w.masked_fill(mask.unsqueeze(1) < 0.5, -1e4)
         w = w.softmax(dim=-1)
+        if mask is not None:
+            invalid = (mask > 0.5).sum(dim=1) < 1
+            if invalid.any():
+                w = torch.where(
+                    invalid.view(B, 1, 1),
+                    torch.full_like(w, 1.0 / max(N, 1)),
+                    w,
+                )
         out = (w @ v).squeeze(1)
         _check_finite("AttentionPool.out", out)
         return out
 
 
 class HybridPool(nn.Module):
-    """Combines mean, max, and attention pooling, projects 3C → C."""
+    """Combines mean, max, and attention pooling, projects 3C → C.
+
+    Optional ``mask`` [B, N] in [0, 1] reweights scene tokens (masked mean / max / attention).
+    """
 
     def __init__(self, dim: int):
         super().__init__()
@@ -268,10 +281,21 @@ class HybridPool(nn.Module):
         self.proj = nn.Linear(dim * 3, dim)
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        mean_f = tokens.mean(dim=1)
-        max_f = tokens.max(dim=1).values
-        attn_f = self.attn_pool(tokens)
+    def forward(self, tokens: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        if mask is None:
+            mean_f = tokens.mean(dim=1)
+            max_f = tokens.max(dim=1).values
+            attn_f = self.attn_pool(tokens)
+        else:
+            m = mask.clamp(0.0, 1.0).unsqueeze(-1)
+            wsum = m.sum(dim=1).clamp(min=1e-6)
+            mean_f = (tokens * m).sum(dim=1) / wsum
+            neg = torch.tensor(-1e4, device=tokens.device, dtype=torch.float32)
+            tok32 = tokens.to(dtype=torch.float32)
+            m32 = m.to(dtype=torch.float32)
+            masked_max = tok32.masked_fill(m32 < 0.5, neg)
+            max_f = masked_max.max(dim=1).values.to(dtype=tokens.dtype)
+            attn_f = self.attn_pool(tokens, mask=mask)
         fused = torch.cat([mean_f, max_f, attn_f], dim=-1)
         _check_finite("HybridPool.fused", fused)
         with torch.autocast(device_type=fused.device.type, enabled=False):
@@ -333,12 +357,20 @@ class PoseHead(nn.Module):
 class HybridPoseNet(nn.Module):
     """Hybrid CNN + DGCNN pose estimation network."""
 
-    def __init__(self, config: ModelConfig, camera_config: dict | None = None):
+    def __init__(
+        self,
+        config: ModelConfig,
+        segmentation: SegmentationConfig | None = None,
+        camera_config: dict | None = None,
+    ):
         super().__init__()
-        camera_config = camera_config or {}
+        _ = camera_config or {}
         se_cfg = config.scene_encoder
         me_cfg = config.point_encoder
         feat_dim = se_cfg.feature_dim
+
+        self.segmentation = segmentation or SegmentationConfig(enabled=False)
+        self.use_segmentation = bool(self.segmentation.enabled)
 
         self.scene_encoder = SceneEncoder(
             base_channels=se_cfg.base_channels,
@@ -369,6 +401,7 @@ class HybridPoseNet(nn.Module):
             hidden_dims=config.fusion.hidden_dims,
             dropout=config.fusion.dropout,
         )
+        self.scene_mask_head = nn.Linear(feat_dim, 1) if self.use_segmentation else None
 
     @staticmethod
     def _build_2d_sincos_pos_encoding(height: int, width: int, dim: int) -> torch.Tensor:
@@ -400,24 +433,30 @@ class HybridPoseNet(nn.Module):
             enc = F.pad(enc, (0, dim - enc.shape[-1]))
         return enc[:, :dim]
 
-    def forward(self, depth: torch.Tensor, model_points: torch.Tensor):
+    def forward(
+        self,
+        depth: torch.Tensor,
+        model_points: torch.Tensor,
+        scene_mask: torch.Tensor | None = None,
+        *,
+        train: bool = False,
+    ) -> dict[str, Any]:
         scene_tokens, (H, W) = self.scene_encoder(depth)
         model_tokens = self.model_encoder(model_points)
         _check_finite("HybridPoseNet.scene_tokens", scene_tokens)
         _check_finite("HybridPoseNet.model_tokens", model_tokens)
-        
-        # Build or use cached pos encoding based on current H, W
+
         key = (H, W)
         if key not in getattr(self, "_pos_cache", {}) or self._pos_cache[key].device != scene_tokens.device:
             pos = self._build_2d_sincos_pos_encoding(H, W, scene_tokens.shape[-1])
             if not hasattr(self, "_pos_cache"):
                 self._pos_cache = {}
             self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_tokens.device, dtype=scene_tokens.dtype)
-            
+
         scene_pos = self._pos_cache[key]
         scene_tokens = scene_tokens + scene_pos
         _check_finite("HybridPoseNet.scene_tokens+pos", scene_tokens)
-        
+
         model_pos = self.model_coord_proj(model_points.to(model_tokens.dtype))
         model_tokens = model_tokens + model_pos
         _check_finite("HybridPoseNet.model_tokens+pos", model_tokens)
@@ -425,18 +464,85 @@ class HybridPoseNet(nn.Module):
             scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
             _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
             _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
-        scene_global = self.scene_pool(scene_tokens)
-        model_global = self.model_pool(model_tokens)
-        fused = torch.cat([scene_global, model_global], dim=-1)
-        _check_finite("HybridPoseNet.fused", fused)
-        translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
+
+        model_global = self.model_pool(model_tokens, mask=None)
+
+        if not self.use_segmentation:
+            scene_global = self.scene_pool(scene_tokens, mask=None)
+            fused = torch.cat([scene_global, model_global], dim=-1)
+            translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
+            return {
+                "translation": translation,
+                "rotation_6d": None,
+                "pred_t": translation,
+                "pred_R": rotation,
+                "confidence_t": confidence_t,
+                "confidence_r": confidence_r,
+            }
+
+        if scene_mask is None:
+            raise ValueError("scene_mask is required when segmentation.enabled is True")
+
+        assert self.scene_mask_head is not None
+        mask_logits = self.scene_mask_head(scene_tokens).squeeze(-1)
+        _check_finite("HybridPoseNet.mask_logits", mask_logits)
+        mask_pred = torch.sigmoid(mask_logits)
+
+        mask_gt_tok = (
+            F.interpolate(scene_mask.float(), size=(H, W), mode="nearest")
+            .reshape(scene_mask.shape[0], H * W)
+            .to(dtype=mask_pred.dtype)
+        )
+
+        if train and self.segmentation.train_pose_with_gt_mask:
+            scene_global = self.scene_pool(scene_tokens, mask=mask_gt_tok)
+            fused = torch.cat([scene_global, model_global], dim=-1)
+            translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
+            return {
+                "translation": translation,
+                "rotation_6d": None,
+                "pred_t": translation,
+                "pred_R": rotation,
+                "confidence_t": confidence_t,
+                "confidence_r": confidence_r,
+                "mask_logits": mask_logits,
+                "mask_gt_tokens": mask_gt_tok,
+            }
+
+        if train:
+            scene_global = self.scene_pool(scene_tokens, mask=mask_pred)
+            fused = torch.cat([scene_global, model_global], dim=-1)
+            translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
+            return {
+                "translation": translation,
+                "rotation_6d": None,
+                "pred_t": translation,
+                "pred_R": rotation,
+                "confidence_t": confidence_t,
+                "confidence_r": confidence_r,
+                "mask_logits": mask_logits,
+                "mask_gt_tokens": mask_gt_tok,
+            }
+
+        scene_global_t = self.scene_pool(scene_tokens, mask=mask_gt_tok)
+        scene_global_s = self.scene_pool(scene_tokens, mask=mask_pred)
+        fused_t = torch.cat([scene_global_t, model_global], dim=-1)
+        fused_s = torch.cat([scene_global_s, model_global], dim=-1)
+        trans_s, rot_s, ct_s, cr_s = self.pose_head(fused_s)
+        trans_t, rot_t, ct_t, cr_t = self.pose_head(fused_t)
         return {
-            "translation": translation,
+            "translation": trans_s,
             "rotation_6d": None,
-            "pred_t": translation,
-            "pred_R": rotation,
-            "confidence_t": confidence_t,
-            "confidence_r": confidence_r,
+            "pred_t": trans_s,
+            "pred_R": rot_s,
+            "confidence_t": ct_s,
+            "confidence_r": cr_s,
+            "pred_t_teacher": trans_t,
+            "pred_R_teacher": rot_t,
+            "confidence_t_teacher": ct_t,
+            "confidence_r_teacher": cr_t,
+            "mask_logits": mask_logits,
+            "mask_gt_tokens": mask_gt_tok,
         }
 
 
@@ -445,4 +551,4 @@ def build_model(config: TrainingConfig) -> HybridPoseNet:
         "padded_height": 256,
         "resolution": {"width": 320, "height": 240},
     }
-    return HybridPoseNet(config.model, camera_config=camera_config)
+    return HybridPoseNet(config.model, segmentation=config.segmentation, camera_config=camera_config)

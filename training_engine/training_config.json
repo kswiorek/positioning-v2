@@ -22,7 +22,15 @@
     "storage": "ram",
     "cache_file": "C:\\KRZYS\\PROG\\cache\\train_split_cache3.npz",
     "num_points": 2048,
-    "depth_max_m": 9.0
+    "depth_max_m": 9.0,
+    "model_points_sampling": "random",
+    "model_points_fps_cap": 8192,
+    "mask_npz_key": "object_mask"
+  },
+  "segmentation": {
+    "enabled": false,
+    "loss_weight": 0.5,
+    "train_pose_with_gt_mask": true
   },
   "model": {
     "scene_encoder": {

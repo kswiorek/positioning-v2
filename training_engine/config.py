@@ -78,6 +78,26 @@ class FusionConfig:
 
 
 @dataclass(frozen=True)
+class SegmentationConfig:
+    """Optional scene foreground mask: supervise a head and mask HybridPool on scene tokens."""
+
+    enabled: bool = False
+    loss_weight: float = 1.0
+    # When True, pose loss uses the GT mask at scene-token resolution during training (teacher forcing).
+    # When False, pose training uses the predicted mask end-to-end.
+    train_pose_with_gt_mask: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "SegmentationConfig":
+        data = data or {}
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            loss_weight=float(data.get("loss_weight", 1.0)),
+            train_pose_with_gt_mask=bool(data.get("train_pose_with_gt_mask", True)),
+        )
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     scene_encoder: SceneEncoderConfig = field(default_factory=SceneEncoderConfig)
     point_encoder: PointEncoderConfig = field(default_factory=PointEncoderConfig)
@@ -177,6 +197,12 @@ class DatasetConfig:
     cache_file: Path | None = None
     num_points: int = 0
     depth_max_m: float = 5.0
+    # "random": uniform subset per __getitem__. "fps": farthest-point greedy subsampling.
+    model_points_sampling: str = "random"
+    # When FPS is used and raw N exceeds this cap, uniformly pre-subsample (then FPS → num_points).
+    model_points_fps_cap: int = 8192
+    # Key in each sample `.npz` for the object mask: [H,W] or [1,H,W], same grid as depth.
+    mask_npz_key: str = "object_mask"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "DatasetConfig":
@@ -185,6 +211,9 @@ class DatasetConfig:
         storage = str(data.get("storage", "ram")).lower()
         if storage not in {"ram", "disk"}:
             raise ValueError("dataset.storage must be either 'ram' or 'disk'")
+        sampling = str(data.get("model_points_sampling", "random")).lower()
+        if sampling not in {"random", "fps"}:
+            raise ValueError("dataset.model_points_sampling must be 'random' or 'fps'")
         return cls(
             dataset_dir=dataset_dir,
             train_split=str(data.get("train_split", "train")),
@@ -193,6 +222,9 @@ class DatasetConfig:
             cache_file=None if data.get("cache_file") in (None, "") else _coerce_path(data.get("cache_file")),
             num_points=int(data.get("num_points", 0)),
             depth_max_m=float(data.get("depth_max_m", 5.0)),
+            model_points_sampling=sampling,
+            model_points_fps_cap=int(data.get("model_points_fps_cap", 8192)),
+            mask_npz_key=str(data.get("mask_npz_key", "object_mask")),
         )
 
 
@@ -201,6 +233,7 @@ class TrainingConfig:
     run_dir: Path
     model: ModelConfig = field(default_factory=ModelConfig)
     dataset: DatasetConfig = field(default_factory=lambda: DatasetConfig(dataset_dir=Path("data/generated/dataset_v2")))
+    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     loss: LossConfig = field(default_factory=LossConfig)
@@ -223,6 +256,7 @@ class TrainingConfig:
             run_dir=_coerce_path(data.get("run_dir", "runs/default")),
             model=ModelConfig.from_dict(data.get("model")),
             dataset=DatasetConfig.from_dict(data.get("dataset")),
+            segmentation=SegmentationConfig.from_dict(data.get("segmentation")),
             optimizer=OptimizerConfig.from_dict(data.get("optimizer")),
             scheduler=SchedulerConfig.from_dict(data.get("scheduler")),
             loss=LossConfig.from_dict(data.get("loss")),

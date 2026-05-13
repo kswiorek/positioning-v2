@@ -37,7 +37,7 @@ Lean metadata format (single contract) is documented in
 Train from a config file in the same style as dataset generation:
 
 ```bash
-python -m training_engine.train --config training_engine/training_config.example.json
+python -m training_engine.train --config training_engine/training_config.json
 ```
 
 The training config defines:

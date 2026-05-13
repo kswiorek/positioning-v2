@@ -33,8 +33,8 @@ try:
     from .checkpoints import load_checkpoint, save_checkpoint
     from .config import TrainingConfig
     from .dataset import build_dataloaders
-    from .geometry import coerce_pose_output
-    from .losses import pose_loss
+    from .geometry import build_transform_from_Rt, coerce_pose_output
+    from .losses import pose_loss, scene_mask_bce_loss
     from .model import build_model
 except Exception:  # pragma: no cover - fallback for direct script execution
     import sys
@@ -43,8 +43,8 @@ except Exception:  # pragma: no cover - fallback for direct script execution
     from training_engine.checkpoints import load_checkpoint, save_checkpoint
     from training_engine.config import TrainingConfig
     from training_engine.dataset import build_dataloaders
-    from training_engine.geometry import coerce_pose_output
-    from training_engine.losses import pose_loss
+    from training_engine.geometry import build_transform_from_Rt, coerce_pose_output
+    from training_engine.losses import pose_loss, scene_mask_bce_loss
     from training_engine.model import build_model
 
 
@@ -56,6 +56,8 @@ class EpochMetrics:
     bbox_corner: float
     rotation_error_deg: float
     confidence: float = 0.0
+    segmentation: float = 0.0
+    val_pose_teacher_loss: float = 0.0
 
 
 def _metrics_to_row(prefix: str, epoch: int, metrics: EpochMetrics, lr: float) -> dict[str, Any]:
@@ -69,6 +71,8 @@ def _metrics_to_row(prefix: str, epoch: int, metrics: EpochMetrics, lr: float) -
         "bbox_corner": metrics.bbox_corner,
         "rotation_error_deg": metrics.rotation_error_deg,
         "confidence": metrics.confidence,
+        "segmentation": metrics.segmentation,
+        "val_pose_teacher_loss": metrics.val_pose_teacher_loss,
     }
 
 
@@ -97,6 +101,9 @@ class TrainingEngine:
         self.train_loader, self.val_loader = train_loader, val_loader
         if self.train_loader is None or self.val_loader is None:
             self.train_loader, self.val_loader = build_dataloaders(config)
+
+        td = self.train_loader.dataset
+        self._train_dataset_for_epoch_hook = td if hasattr(td, "set_epoch") else None
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -151,6 +158,8 @@ class TrainingEngine:
                     "bbox_corner",
                     "rotation_error_deg",
                     "confidence",
+                    "segmentation",
+                    "val_pose_teacher_loss",
                 ],
             )
             writer.writeheader()
@@ -220,6 +229,8 @@ class TrainingEngine:
         ]
         if "confidence" in metrics:
             parts.append(f"conf={metrics['confidence']:.4f}")
+        if metrics.get("segmentation", 0.0) != 0.0:
+            parts.append(f"seg={metrics['segmentation']:.4f}")
         print(" | ".join(parts), flush=True)
 
     def _write_tensorboard_scalars(
@@ -234,13 +245,16 @@ class TrainingEngine:
             self.writer.add_scalar(f"{phase}/{key}", value, step)
 
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "depth": batch["depth"].to(self.device, non_blocking=True),
             "model_points": batch["model_points"].to(self.device, non_blocking=True),
             "gt_transform": batch["gt_transform"].to(self.device, non_blocking=True),
             "bbox_corners": batch["bbox_corners"].to(self.device, non_blocking=True),
-            "sample_id": batch.get("sample_id"),  # Keep sample IDs for debugging
+            "sample_id": batch.get("sample_id"),
         }
+        if "scene_mask" in batch:
+            out["scene_mask"] = batch["scene_mask"].to(self.device, non_blocking=True)
+        return out
 
     def _run_epoch(
         self,
@@ -260,6 +274,8 @@ class TrainingEngine:
             "bbox_corner": 0.0,
             "rotation_error_deg": 0.0,
             "confidence": 0.0,
+            "segmentation": 0.0,
+            "val_pose_teacher_loss": 0.0,
         }
         n_batches = 0
         use_amp = self.scaler.is_enabled()
@@ -268,14 +284,25 @@ class TrainingEngine:
         start_time = time.perf_counter()
         total_batches = len(loader) if hasattr(loader, "__len__") else None
 
+        seg_cfg = self.config.segmentation
         with context:
             for batch_idx, batch in enumerate(loader, start=1):
                 batch = self._move_batch(batch)
                 with torch.amp.autocast(device_type=self.device.type, enabled=use_amp):
-                    model_output = self.model(batch["depth"], batch["model_points"])
+                    if seg_cfg.enabled:
+                        if "scene_mask" not in batch:
+                            raise ValueError("segmentation.enabled requires batches to include 'scene_mask'")
+                        model_output = self.model(
+                            batch["depth"],
+                            batch["model_points"],
+                            batch["scene_mask"],
+                            train=train,
+                        )
+                    else:
+                        model_output = self.model(batch["depth"], batch["model_points"])
+
                     pred_transform = coerce_pose_output(model_output)
                     _check_finite("pred_transform", pred_transform, epoch=epoch, batch_idx=batch_idx, phase=phase)
-                    # Extract confidence predictions if available
                     pred_conf_t = model_output.get("confidence_t")
                     pred_conf_r = model_output.get("confidence_r")
                     loss_dict = pose_loss(
@@ -286,13 +313,42 @@ class TrainingEngine:
                         pred_conf_r=pred_conf_r,
                         weights=self.loss_weights,
                     )
-                    
-                        # Log anomalously high loss samples to file
+
+                    if seg_cfg.enabled and "mask_logits" in model_output:
+                        seg_loss = scene_mask_bce_loss(
+                            model_output["mask_logits"],
+                            model_output["mask_gt_tokens"],
+                        )
+                        loss_dict["loss"] = loss_dict["loss"] + seg_cfg.loss_weight * seg_loss
+                        loss_dict["segmentation"] = float(seg_loss.detach().cpu())
+
+                    if (
+                        not train
+                        and seg_cfg.enabled
+                        and model_output.get("pred_R_teacher") is not None
+                        and model_output.get("pred_t_teacher") is not None
+                    ):
+                        pred_tfm_teacher = build_transform_from_Rt(
+                            model_output["pred_R_teacher"],
+                            model_output["pred_t_teacher"],
+                        )
+                        loss_teacher = pose_loss(
+                            pred_transform=pred_tfm_teacher,
+                            gt_transform=batch["gt_transform"],
+                            bbox_corners=batch["bbox_corners"],
+                            pred_conf_t=model_output.get("confidence_t_teacher"),
+                            pred_conf_r=model_output.get("confidence_r_teacher"),
+                            weights=self.loss_weights,
+                        )
+                        loss_dict["val_pose_teacher_loss"] = float(loss_teacher["loss"].detach().cpu())
+
                     batch_loss = float(loss_dict["loss"].detach().cpu())
                     if batch_loss > 100:
                         sample_ids = batch.get("sample_id")
                         with self.high_loss_samples_path.open("a", encoding="utf-8") as f:
-                            f.write(f"epoch={epoch + 1} batch={batch_idx} phase={phase} loss={batch_loss:.2f} samples={sample_ids}\n")
+                            f.write(
+                                f"epoch={epoch + 1} batch={batch_idx} phase={phase} loss={batch_loss:.2f} samples={sample_ids}\n"
+                            )
 
                 if train:
                     self.optimizer.zero_grad(set_to_none=True)
@@ -343,6 +399,8 @@ class TrainingEngine:
                                 "bbox_corner": quick_metrics.bbox_corner,
                                 "rotation_error_deg": quick_metrics.rotation_error_deg,
                                 "confidence": quick_metrics.confidence,
+                                "segmentation": quick_metrics.segmentation,
+                                "pose_teacher_loss": quick_metrics.val_pose_teacher_loss,
                             },
                         )
                         print(
@@ -364,6 +422,8 @@ class TrainingEngine:
             bbox_corner=totals["bbox_corner"] / divisor,
             rotation_error_deg=totals["rotation_error_deg"] / divisor,
             confidence=totals["confidence"] / divisor,
+            segmentation=totals["segmentation"] / divisor,
+            val_pose_teacher_loss=totals["val_pose_teacher_loss"] / divisor,
         )
 
     def _step_scheduler(self, epoch: int) -> None:
@@ -389,6 +449,9 @@ class TrainingEngine:
             if self.config.scheduler.warmup_epochs > 0 and epoch < self.config.scheduler.warmup_epochs:
                 self._set_warmup_lr(epoch)
 
+            if self._train_dataset_for_epoch_hook is not None:
+                self._train_dataset_for_epoch_hook.set_epoch(epoch)
+
             train_metrics = self._run_epoch(self.train_loader, train=True, epoch=epoch, phase="train")
             val_metrics = self._run_epoch(self.val_loader, train=False, epoch=epoch, phase="val")
 
@@ -408,6 +471,7 @@ class TrainingEngine:
                     "bbox_corner": train_metrics.bbox_corner,
                     "rotation_error_deg": train_metrics.rotation_error_deg,
                     "confidence": train_metrics.confidence,
+                    "segmentation": train_metrics.segmentation,
                 },
             )
             self._write_tensorboard_scalars(
@@ -420,6 +484,8 @@ class TrainingEngine:
                     "bbox_corner": val_metrics.bbox_corner,
                     "rotation_error_deg": val_metrics.rotation_error_deg,
                     "confidence": val_metrics.confidence,
+                    "segmentation": val_metrics.segmentation,
+                    "pose_teacher_loss": val_metrics.val_pose_teacher_loss,
                 },
             )
             if self.writer is not None:

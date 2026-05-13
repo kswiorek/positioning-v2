@@ -603,6 +603,9 @@ def _generate_sample_from_plan(
             rng=artifacts_rng,
         )
 
+        # Binary mask in image space: object has valid rendered depth (same grid as composite_depth).
+        object_mask = (np.isfinite(object_depth) & (object_depth > 0.0)).astype(np.float32)
+
         sample_id = f"{plan.sample_index:06d}"
         out_path = Path(out_samples_dir) / f"{sample_id}.npz"
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -613,11 +616,13 @@ def _generate_sample_from_plan(
                 "background_depth_m": background_depth.astype(np.float32),
                 "object_depth_m": object_depth.astype(np.float32),
                 "composite_depth_m": composite_depth.astype(np.float32),
+                "object_mask": object_mask,
                 "model_points": model_points,
             }
         else:
             save_dict = {
                 "composite_depth_m": composite_depth.astype(np.float32),
+                "object_mask": object_mask,
                 "model_points": model_points,
             }
 
