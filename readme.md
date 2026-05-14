@@ -47,8 +47,8 @@ The training config defines:
 - model architecture settings
 - optimizer, scheduler, and loss weights
 - checkpoint/run directory and resume behavior
-- batch-level console progress and short validation intervals under `monitoring`
-- TensorBoard scalar logging when enabled
+- batch-level console progress under `monitoring`
+- per-epoch TensorBoard scalar groups when enabled: `train_epoch`, `val_pred_mask`, and `val_gt_mask` (only if segmentation is enabled)
 
 If TensorBoard is installed, you can watch a run with:
 

@@ -83,8 +83,8 @@ class SegmentationConfig:
 
     enabled: bool = False
     loss_weight: float = 1.0
-    # When True, pose loss uses the GT mask at scene-token resolution during training (teacher forcing).
-    # When False, pose training uses the predicted mask end-to-end.
+    # When True, training uses the GT mask to gate scene tokens (zeroing + pooling) before/at fusion.
+    # When False, training uses the predicted hard mask end-to-end for that path.
     train_pose_with_gt_mask: bool = True
 
     @classmethod
@@ -173,8 +173,6 @@ class LossConfig:
 @dataclass(frozen=True)
 class MonitoringConfig:
     log_every_n_batches: int = 10
-    quick_validation_every_n_train_batches: int = 0
-    quick_validation_batches: int = 8
     tensorboard: bool = True
 
     @classmethod
@@ -182,8 +180,6 @@ class MonitoringConfig:
         data = data or {}
         return cls(
             log_every_n_batches=int(data.get("log_every_n_batches", 10)),
-            quick_validation_every_n_train_batches=int(data.get("quick_validation_every_n_train_batches", 0)),
-            quick_validation_batches=int(data.get("quick_validation_batches", 8)),
             tensorboard=bool(data.get("tensorboard", True)),
         )
 

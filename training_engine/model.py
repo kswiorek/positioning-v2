@@ -433,6 +433,28 @@ class HybridPoseNet(nn.Module):
             enc = F.pad(enc, (0, dim - enc.shape[-1]))
         return enc[:, :dim]
 
+    def _segmentation_pose_branch(
+        self,
+        scene_with_pos: torch.Tensor,
+        gate_mask: torch.Tensor,
+        model_tokens_init: torch.Tensor,
+        *,
+        tag: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run gated scene tokens through cross-attention, pool, and pose head (shared weights)."""
+        scene_tokens = scene_with_pos * gate_mask.unsqueeze(-1)
+        _check_finite(f"HybridPoseNet.scene_tokens_masked/{tag}", scene_tokens)
+        model_tokens = model_tokens_init
+        for layer in self.cross_attention:
+            scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
+            _check_finite(f"HybridPoseNet.scene_tokens.attn/{tag}", scene_tokens)
+            _check_finite(f"HybridPoseNet.model_tokens.attn/{tag}", model_tokens)
+
+        model_global = self.model_pool(model_tokens, mask=None)
+        scene_global = self.scene_pool(scene_tokens, mask=gate_mask)
+        fused = torch.cat([scene_global, model_global], dim=-1)
+        return self.pose_head(fused)
+
     def forward(
         self,
         depth: torch.Tensor,
@@ -441,33 +463,32 @@ class HybridPoseNet(nn.Module):
         *,
         train: bool = False,
     ) -> dict[str, Any]:
-        scene_tokens, (H, W) = self.scene_encoder(depth)
+        scene_raw, (H, W) = self.scene_encoder(depth)
         model_tokens = self.model_encoder(model_points)
-        _check_finite("HybridPoseNet.scene_tokens", scene_tokens)
+        _check_finite("HybridPoseNet.scene_tokens", scene_raw)
         _check_finite("HybridPoseNet.model_tokens", model_tokens)
 
         key = (H, W)
-        if key not in getattr(self, "_pos_cache", {}) or self._pos_cache[key].device != scene_tokens.device:
-            pos = self._build_2d_sincos_pos_encoding(H, W, scene_tokens.shape[-1])
+        if key not in getattr(self, "_pos_cache", {}) or self._pos_cache[key].device != scene_raw.device:
+            pos = self._build_2d_sincos_pos_encoding(H, W, scene_raw.shape[-1])
             if not hasattr(self, "_pos_cache"):
                 self._pos_cache = {}
-            self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_tokens.device, dtype=scene_tokens.dtype)
+            self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_raw.device, dtype=scene_raw.dtype)
 
-        scene_pos = self._pos_cache[key]
-        scene_tokens = scene_tokens + scene_pos
-        _check_finite("HybridPoseNet.scene_tokens+pos", scene_tokens)
+        scene_with_pos = scene_raw + self._pos_cache[key]
+        _check_finite("HybridPoseNet.scene_tokens+pos", scene_with_pos)
 
-        model_pos = self.model_coord_proj(model_points.to(model_tokens.dtype))
-        model_tokens = model_tokens + model_pos
+        model_tokens = model_tokens + self.model_coord_proj(model_points.to(model_tokens.dtype))
         _check_finite("HybridPoseNet.model_tokens+pos", model_tokens)
-        for layer in self.cross_attention:
-            scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
-            _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
-            _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
-
-        model_global = self.model_pool(model_tokens, mask=None)
 
         if not self.use_segmentation:
+            scene_tokens = scene_with_pos
+            for layer in self.cross_attention:
+                scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
+                _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
+                _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
+
+            model_global = self.model_pool(model_tokens, mask=None)
             scene_global = self.scene_pool(scene_tokens, mask=None)
             fused = torch.cat([scene_global, model_global], dim=-1)
             translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
@@ -480,67 +501,59 @@ class HybridPoseNet(nn.Module):
                 "confidence_r": confidence_r,
             }
 
-        if scene_mask is None:
-            raise ValueError("scene_mask is required when segmentation.enabled is True")
-
         assert self.scene_mask_head is not None
-        mask_logits = self.scene_mask_head(scene_tokens).squeeze(-1)
+        mask_logits = self.scene_mask_head(scene_raw).squeeze(-1)
         _check_finite("HybridPoseNet.mask_logits", mask_logits)
         mask_pred = torch.sigmoid(mask_logits)
 
-        mask_gt_tok = (
-            F.interpolate(scene_mask.float(), size=(H, W), mode="nearest")
-            .reshape(scene_mask.shape[0], H * W)
-            .to(dtype=mask_pred.dtype)
+        mask_gt_tok: torch.Tensor | None = None
+        if scene_mask is not None:
+            mask_gt_tok = (
+                F.interpolate(scene_mask.float(), size=(H, W), mode="nearest")
+                .reshape(scene_mask.shape[0], H * W)
+                .to(dtype=scene_raw.dtype)
+            )
+
+        pred_hard = (mask_pred > 0.5).to(scene_raw.dtype)
+
+        dual_eval = (not train) and (mask_gt_tok is not None)
+        if dual_eval:
+            trans_p, rot_p, ct_p, cr_p = self._segmentation_pose_branch(
+                scene_with_pos, pred_hard, model_tokens.clone(), tag="pred_mask"
+            )
+            trans_g, rot_g, ct_g, cr_g = self._segmentation_pose_branch(
+                scene_with_pos, mask_gt_tok, model_tokens.clone(), tag="gt_mask"
+            )
+            return {
+                "translation": trans_p,
+                "rotation_6d": None,
+                "pred_t": trans_p,
+                "pred_R": rot_p,
+                "confidence_t": ct_p,
+                "confidence_r": cr_p,
+                "pred_t_gt_mask": trans_g,
+                "pred_R_gt_mask": rot_g,
+                "confidence_t_gt_mask": ct_g,
+                "confidence_r_gt_mask": cr_g,
+                "mask_logits": mask_logits,
+                "mask_gt_tokens": mask_gt_tok,
+            }
+
+        if train and self.segmentation.train_pose_with_gt_mask and mask_gt_tok is not None:
+            gate = mask_gt_tok
+        else:
+            gate = pred_hard
+
+        translation, rotation, confidence_t, confidence_r = self._segmentation_pose_branch(
+            scene_with_pos, gate, model_tokens, tag="train" if train else "pred_mask"
         )
-
-        if train and self.segmentation.train_pose_with_gt_mask:
-            scene_global = self.scene_pool(scene_tokens, mask=mask_gt_tok)
-            fused = torch.cat([scene_global, model_global], dim=-1)
-            translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
-            return {
-                "translation": translation,
-                "rotation_6d": None,
-                "pred_t": translation,
-                "pred_R": rotation,
-                "confidence_t": confidence_t,
-                "confidence_r": confidence_r,
-                "mask_logits": mask_logits,
-                "mask_gt_tokens": mask_gt_tok,
-            }
-
-        if train:
-            scene_global = self.scene_pool(scene_tokens, mask=mask_pred)
-            fused = torch.cat([scene_global, model_global], dim=-1)
-            translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
-            return {
-                "translation": translation,
-                "rotation_6d": None,
-                "pred_t": translation,
-                "pred_R": rotation,
-                "confidence_t": confidence_t,
-                "confidence_r": confidence_r,
-                "mask_logits": mask_logits,
-                "mask_gt_tokens": mask_gt_tok,
-            }
-
-        scene_global_t = self.scene_pool(scene_tokens, mask=mask_gt_tok)
-        scene_global_s = self.scene_pool(scene_tokens, mask=mask_pred)
-        fused_t = torch.cat([scene_global_t, model_global], dim=-1)
-        fused_s = torch.cat([scene_global_s, model_global], dim=-1)
-        trans_s, rot_s, ct_s, cr_s = self.pose_head(fused_s)
-        trans_t, rot_t, ct_t, cr_t = self.pose_head(fused_t)
         return {
-            "translation": trans_s,
+            "translation": translation,
             "rotation_6d": None,
-            "pred_t": trans_s,
-            "pred_R": rot_s,
-            "confidence_t": ct_s,
-            "confidence_r": cr_s,
-            "pred_t_teacher": trans_t,
-            "pred_R_teacher": rot_t,
-            "confidence_t_teacher": ct_t,
-            "confidence_r_teacher": cr_t,
+            "pred_t": translation,
+            "pred_R": rotation,
+            "confidence_t": confidence_t,
+            "confidence_r": confidence_r,
             "mask_logits": mask_logits,
             "mask_gt_tokens": mask_gt_tok,
         }

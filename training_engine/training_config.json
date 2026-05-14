@@ -11,8 +11,6 @@
   "resume_latest": true,
   "monitoring": {
     "log_every_n_batches": 10,
-    "quick_validation_every_n_train_batches": 500,
-    "quick_validation_batches": 8,
     "tensorboard": true
   },
   "dataset": {
