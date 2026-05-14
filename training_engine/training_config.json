@@ -16,7 +16,7 @@
     "tensorboard": true
   },
   "dataset": {
-    "dataset_dir": "data/generated/dataset_glider",
+    "dataset_dir": "data/generated/dataset_glider_small",
     "train_split": "train",
     "val_split": "val",
     "storage": "ram",
@@ -28,7 +28,7 @@
     "mask_npz_key": "object_mask"
   },
   "segmentation": {
-    "enabled": false,
+    "enabled": true,
     "loss_weight": 0.5,
     "train_pose_with_gt_mask": true
   },

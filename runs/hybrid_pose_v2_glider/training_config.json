@@ -31,7 +31,7 @@
       }
     },
     "dataset": {
-      "dataset_dir": "data\\generated\\dataset_glider",
+      "dataset_dir": "data\\generated\\dataset_glider_small",
       "train_split": "train",
       "val_split": "val",
       "storage": "ram",
@@ -39,7 +39,13 @@
       "num_points": 2048,
       "depth_max_m": 9.0,
       "model_points_sampling": "random",
-      "model_points_fps_cap": 8192
+      "model_points_fps_cap": 8192,
+      "mask_npz_key": "object_mask"
+    },
+    "segmentation": {
+      "enabled": true,
+      "loss_weight": 0.5,
+      "train_pose_with_gt_mask": true
     },
     "optimizer": {
       "learning_rate": 0.001,

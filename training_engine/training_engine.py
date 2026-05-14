@@ -365,7 +365,8 @@ class TrainingEngine:
 
                 for key in totals:
                     if key in loss_dict:
-                        totals[key] += float(loss_dict[key].detach().cpu())
+                        v = loss_dict[key]
+                        totals[key] += float(v.detach().cpu()) if torch.is_tensor(v) else float(v)
                 n_batches += 1
                 if train:
                     self.global_step += 1

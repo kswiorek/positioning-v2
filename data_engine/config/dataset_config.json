@@ -1,6 +1,6 @@
 {
   "seed": 12345,
-  "output_dir": "data/generated/dataset_glider",
+  "output_dir": "data/generated/dataset_glider_small",
   "background_glob": "data/backgrounds/raw/**/depth/*.npz",
   "num_samples": 25000,
   "train_validation_split": {
