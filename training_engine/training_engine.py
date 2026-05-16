@@ -33,8 +33,8 @@ try:
     from .checkpoints import load_checkpoint, save_checkpoint
     from .config import TrainingConfig
     from .dataset import build_dataloaders
-    from .geometry import build_transform_from_Rt, coerce_pose_output
-    from .losses import pose_loss, scene_mask_bce_loss
+    from .geometry import coerce_pose_output
+    from .losses import pose_loss
     from .model import build_model
 except Exception:  # pragma: no cover - fallback for direct script execution
     import sys
@@ -43,8 +43,8 @@ except Exception:  # pragma: no cover - fallback for direct script execution
     from training_engine.checkpoints import load_checkpoint, save_checkpoint
     from training_engine.config import TrainingConfig
     from training_engine.dataset import build_dataloaders
-    from training_engine.geometry import build_transform_from_Rt, coerce_pose_output
-    from training_engine.losses import pose_loss, scene_mask_bce_loss
+    from training_engine.geometry import coerce_pose_output
+    from training_engine.losses import pose_loss
     from training_engine.model import build_model
 
 
@@ -56,14 +56,6 @@ class EpochMetrics:
     bbox_corner: float
     rotation_error_deg: float
     confidence: float = 0.0
-    segmentation: float = 0.0
-    val_pose_loss_pred_mask: float = 0.0
-    val_pose_loss_gt_mask: float = 0.0
-    val_gt_translation: float = 0.0
-    val_gt_rotation: float = 0.0
-    val_gt_bbox_corner: float = 0.0
-    val_gt_rotation_error_deg: float = 0.0
-    val_gt_confidence: float = 0.0
 
 
 def _metrics_to_row(prefix: str, epoch: int, metrics: EpochMetrics, lr: float) -> dict[str, Any]:
@@ -77,14 +69,6 @@ def _metrics_to_row(prefix: str, epoch: int, metrics: EpochMetrics, lr: float) -
         "bbox_corner": metrics.bbox_corner,
         "rotation_error_deg": metrics.rotation_error_deg,
         "confidence": metrics.confidence,
-        "segmentation": metrics.segmentation,
-        "val_pose_loss_pred_mask": metrics.val_pose_loss_pred_mask,
-        "val_pose_loss_gt_mask": metrics.val_pose_loss_gt_mask,
-        "val_gt_translation": metrics.val_gt_translation,
-        "val_gt_rotation": metrics.val_gt_rotation,
-        "val_gt_bbox_corner": metrics.val_gt_bbox_corner,
-        "val_gt_rotation_error_deg": metrics.val_gt_rotation_error_deg,
-        "val_gt_confidence": metrics.val_gt_confidence,
     }
 
 
@@ -170,14 +154,6 @@ class TrainingEngine:
                     "bbox_corner",
                     "rotation_error_deg",
                     "confidence",
-                    "segmentation",
-                    "val_pose_loss_pred_mask",
-                    "val_pose_loss_gt_mask",
-                    "val_gt_translation",
-                    "val_gt_rotation",
-                    "val_gt_bbox_corner",
-                    "val_gt_rotation_error_deg",
-                    "val_gt_confidence",
                 ],
             )
             writer.writeheader()
@@ -247,8 +223,6 @@ class TrainingEngine:
         ]
         if "confidence" in metrics:
             parts.append(f"conf={metrics['confidence']:.4f}")
-        if metrics.get("segmentation", 0.0) != 0.0:
-            parts.append(f"seg={metrics['segmentation']:.4f}")
         print(" | ".join(parts), flush=True)
 
     def _write_tensorboard_scalars(
@@ -292,14 +266,6 @@ class TrainingEngine:
             "bbox_corner": 0.0,
             "rotation_error_deg": 0.0,
             "confidence": 0.0,
-            "segmentation": 0.0,
-            "val_pose_loss_pred_mask": 0.0,
-            "val_pose_loss_gt_mask": 0.0,
-            "val_gt_translation": 0.0,
-            "val_gt_rotation": 0.0,
-            "val_gt_bbox_corner": 0.0,
-            "val_gt_rotation_error_deg": 0.0,
-            "val_gt_confidence": 0.0,
         }
         n_batches = 0
         use_amp = self.scaler.is_enabled()
@@ -320,7 +286,6 @@ class TrainingEngine:
                             batch["depth"],
                             batch["model_points"],
                             batch["scene_mask"],
-                            train=train,
                         )
                     else:
                         model_output = self.model(batch["depth"], batch["model_points"])
@@ -337,45 +302,6 @@ class TrainingEngine:
                         pred_conf_r=pred_conf_r,
                         weights=self.loss_weights,
                     )
-
-                    if not train and seg_cfg.enabled:
-                        loss_dict["val_pose_loss_pred_mask"] = float(loss_dict["loss"].detach().cpu())
-
-                    if seg_cfg.enabled and "mask_logits" in model_output:
-                        seg_loss = scene_mask_bce_loss(
-                            model_output["mask_logits"],
-                            model_output["mask_gt_tokens"],
-                        )
-                        loss_dict["loss"] = loss_dict["loss"] + seg_cfg.loss_weight * seg_loss
-                        loss_dict["segmentation"] = float(seg_loss.detach().cpu())
-
-                    if (
-                        not train
-                        and seg_cfg.enabled
-                        and model_output.get("pred_R_gt_mask") is not None
-                        and model_output.get("pred_t_gt_mask") is not None
-                    ):
-                        pred_tfm_gt = build_transform_from_Rt(
-                            model_output["pred_R_gt_mask"],
-                            model_output["pred_t_gt_mask"],
-                        )
-                        loss_gt = pose_loss(
-                            pred_transform=pred_tfm_gt,
-                            gt_transform=batch["gt_transform"],
-                            bbox_corners=batch["bbox_corners"],
-                            pred_conf_t=model_output.get("confidence_t_gt_mask"),
-                            pred_conf_r=model_output.get("confidence_r_gt_mask"),
-                            weights=self.loss_weights,
-                        )
-                        loss_dict["val_pose_loss_gt_mask"] = float(loss_gt["loss"].detach().cpu())
-                        loss_dict["val_gt_translation"] = float(loss_gt["translation"].detach().cpu())
-                        loss_dict["val_gt_rotation"] = float(loss_gt["rotation"].detach().cpu())
-                        loss_dict["val_gt_bbox_corner"] = float(loss_gt["bbox_corner"].detach().cpu())
-                        loss_dict["val_gt_rotation_error_deg"] = float(
-                            loss_gt["rotation_error_deg"].detach().cpu()
-                        )
-                        if "confidence" in loss_gt:
-                            loss_dict["val_gt_confidence"] = float(loss_gt["confidence"].detach().cpu())
 
                     batch_loss = float(loss_dict["loss"].detach().cpu())
                     if batch_loss > 100:
@@ -421,14 +347,6 @@ class TrainingEngine:
             bbox_corner=totals["bbox_corner"] / divisor,
             rotation_error_deg=totals["rotation_error_deg"] / divisor,
             confidence=totals["confidence"] / divisor,
-            segmentation=totals["segmentation"] / divisor,
-            val_pose_loss_pred_mask=totals["val_pose_loss_pred_mask"] / divisor,
-            val_pose_loss_gt_mask=totals["val_pose_loss_gt_mask"] / divisor,
-            val_gt_translation=totals["val_gt_translation"] / divisor,
-            val_gt_rotation=totals["val_gt_rotation"] / divisor,
-            val_gt_bbox_corner=totals["val_gt_bbox_corner"] / divisor,
-            val_gt_rotation_error_deg=totals["val_gt_rotation_error_deg"] / divisor,
-            val_gt_confidence=totals["val_gt_confidence"] / divisor,
         )
 
     def _step_scheduler(self, epoch: int) -> None:
@@ -478,37 +396,21 @@ class TrainingEngine:
                         "bbox_corner": train_metrics.bbox_corner,
                         "rotation_error_deg": train_metrics.rotation_error_deg,
                         "confidence": train_metrics.confidence,
-                        "segmentation": train_metrics.segmentation,
                         "lr": current_lr,
                     },
                 )
                 self._write_tensorboard_scalars(
-                    "val_pred_mask",
+                    "val_epoch",
                     tb_step,
                     {
-                        "total_loss": val_metrics.loss,
-                        "pose_loss": val_metrics.val_pose_loss_pred_mask,
+                        "loss": val_metrics.loss,
                         "translation": val_metrics.translation,
                         "rotation": val_metrics.rotation,
                         "bbox_corner": val_metrics.bbox_corner,
                         "rotation_error_deg": val_metrics.rotation_error_deg,
                         "confidence": val_metrics.confidence,
-                        "segmentation": val_metrics.segmentation,
                     },
                 )
-                if self.config.segmentation.enabled:
-                    self._write_tensorboard_scalars(
-                        "val_gt_mask",
-                        tb_step,
-                        {
-                            "pose_loss": val_metrics.val_pose_loss_gt_mask,
-                            "translation": val_metrics.val_gt_translation,
-                            "rotation": val_metrics.val_gt_rotation,
-                            "bbox_corner": val_metrics.val_gt_bbox_corner,
-                            "rotation_error_deg": val_metrics.val_gt_rotation_error_deg,
-                            "confidence": val_metrics.val_gt_confidence,
-                        },
-                    )
 
             latest_path = self.checkpoint_dir / "latest.pth"
             save_checkpoint(

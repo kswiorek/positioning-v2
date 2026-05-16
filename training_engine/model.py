@@ -245,35 +245,22 @@ class AttentionPool(nn.Module):
         self.v = nn.Linear(dim, dim, bias=False)
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, tokens: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
-        B, N, _ = tokens.shape
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        B, _, _ = tokens.shape
         t = self.norm(tokens)
         _check_finite("AttentionPool.norm", t)
         q = self.query.expand(B, -1, -1)
         k = self.k(t)
         v = self.v(t)
         w = (q @ k.transpose(-2, -1)) * self.scale
-        if mask is not None:
-            w = w.masked_fill(mask.unsqueeze(1) < 0.5, -1e4)
         w = w.softmax(dim=-1)
-        if mask is not None:
-            invalid = (mask > 0.5).sum(dim=1) < 1
-            if invalid.any():
-                w = torch.where(
-                    invalid.view(B, 1, 1),
-                    torch.full_like(w, 1.0 / max(N, 1)),
-                    w,
-                )
         out = (w @ v).squeeze(1)
         _check_finite("AttentionPool.out", out)
         return out
 
 
 class HybridPool(nn.Module):
-    """Combines mean, max, and attention pooling, projects 3C → C.
-
-    Optional ``mask`` [B, N] in [0, 1] reweights scene tokens (masked mean / max / attention).
-    """
+    """Combines mean, max, and attention pooling, projects 3C → C."""
 
     def __init__(self, dim: int):
         super().__init__()
@@ -281,21 +268,10 @@ class HybridPool(nn.Module):
         self.proj = nn.Linear(dim * 3, dim)
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, tokens: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
-        if mask is None:
-            mean_f = tokens.mean(dim=1)
-            max_f = tokens.max(dim=1).values
-            attn_f = self.attn_pool(tokens)
-        else:
-            m = mask.clamp(0.0, 1.0).unsqueeze(-1)
-            wsum = m.sum(dim=1).clamp(min=1e-6)
-            mean_f = (tokens * m).sum(dim=1) / wsum
-            neg = torch.tensor(-1e4, device=tokens.device, dtype=torch.float32)
-            tok32 = tokens.to(dtype=torch.float32)
-            m32 = m.to(dtype=torch.float32)
-            masked_max = tok32.masked_fill(m32 < 0.5, neg)
-            max_f = masked_max.max(dim=1).values.to(dtype=tokens.dtype)
-            attn_f = self.attn_pool(tokens, mask=mask)
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        mean_f = tokens.mean(dim=1)
+        max_f = tokens.max(dim=1).values
+        attn_f = self.attn_pool(tokens)
         fused = torch.cat([mean_f, max_f, attn_f], dim=-1)
         _check_finite("HybridPool.fused", fused)
         with torch.autocast(device_type=fused.device.type, enabled=False):
@@ -401,7 +377,6 @@ class HybridPoseNet(nn.Module):
             hidden_dims=config.fusion.hidden_dims,
             dropout=config.fusion.dropout,
         )
-        self.scene_mask_head = nn.Linear(feat_dim, 1) if self.use_segmentation else None
 
     @staticmethod
     def _build_2d_sincos_pos_encoding(height: int, width: int, dim: int) -> torch.Tensor:
@@ -433,36 +408,18 @@ class HybridPoseNet(nn.Module):
             enc = F.pad(enc, (0, dim - enc.shape[-1]))
         return enc[:, :dim]
 
-    def _segmentation_pose_branch(
-        self,
-        scene_with_pos: torch.Tensor,
-        gate_mask: torch.Tensor,
-        model_tokens_init: torch.Tensor,
-        *,
-        tag: str,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Run gated scene tokens through cross-attention, pool, and pose head (shared weights)."""
-        scene_tokens = scene_with_pos * gate_mask.unsqueeze(-1)
-        _check_finite(f"HybridPoseNet.scene_tokens_masked/{tag}", scene_tokens)
-        model_tokens = model_tokens_init
-        for layer in self.cross_attention:
-            scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
-            _check_finite(f"HybridPoseNet.scene_tokens.attn/{tag}", scene_tokens)
-            _check_finite(f"HybridPoseNet.model_tokens.attn/{tag}", model_tokens)
-
-        model_global = self.model_pool(model_tokens, mask=None)
-        scene_global = self.scene_pool(scene_tokens, mask=gate_mask)
-        fused = torch.cat([scene_global, model_global], dim=-1)
-        return self.pose_head(fused)
-
     def forward(
         self,
         depth: torch.Tensor,
         model_points: torch.Tensor,
         scene_mask: torch.Tensor | None = None,
-        *,
-        train: bool = False,
     ) -> dict[str, Any]:
+        if self.use_segmentation:
+            if scene_mask is None:
+                raise ValueError("segmentation.enabled requires scene_mask")
+            depth = depth * scene_mask.clamp(0.0, 1.0)
+            _check_finite("HybridPoseNet.masked_depth", depth)
+
         scene_raw, (H, W) = self.scene_encoder(depth)
         model_tokens = self.model_encoder(model_points)
         _check_finite("HybridPoseNet.scene_tokens", scene_raw)
@@ -475,78 +432,21 @@ class HybridPoseNet(nn.Module):
                 self._pos_cache = {}
             self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_raw.device, dtype=scene_raw.dtype)
 
-        scene_with_pos = scene_raw + self._pos_cache[key]
-        _check_finite("HybridPoseNet.scene_tokens+pos", scene_with_pos)
+        scene_tokens = scene_raw + self._pos_cache[key]
+        _check_finite("HybridPoseNet.scene_tokens+pos", scene_tokens)
 
         model_tokens = model_tokens + self.model_coord_proj(model_points.to(model_tokens.dtype))
         _check_finite("HybridPoseNet.model_tokens+pos", model_tokens)
 
-        if not self.use_segmentation:
-            scene_tokens = scene_with_pos
-            for layer in self.cross_attention:
-                scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
-                _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
-                _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
+        for layer in self.cross_attention:
+            scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
+            _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
+            _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
 
-            model_global = self.model_pool(model_tokens, mask=None)
-            scene_global = self.scene_pool(scene_tokens, mask=None)
-            fused = torch.cat([scene_global, model_global], dim=-1)
-            translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
-            return {
-                "translation": translation,
-                "rotation_6d": None,
-                "pred_t": translation,
-                "pred_R": rotation,
-                "confidence_t": confidence_t,
-                "confidence_r": confidence_r,
-            }
-
-        assert self.scene_mask_head is not None
-        mask_logits = self.scene_mask_head(scene_raw).squeeze(-1)
-        _check_finite("HybridPoseNet.mask_logits", mask_logits)
-        mask_pred = torch.sigmoid(mask_logits)
-
-        mask_gt_tok: torch.Tensor | None = None
-        if scene_mask is not None:
-            mask_gt_tok = (
-                F.interpolate(scene_mask.float(), size=(H, W), mode="nearest")
-                .reshape(scene_mask.shape[0], H * W)
-                .to(dtype=scene_raw.dtype)
-            )
-
-        pred_hard = (mask_pred > 0.5).to(scene_raw.dtype)
-
-        dual_eval = (not train) and (mask_gt_tok is not None)
-        if dual_eval:
-            trans_p, rot_p, ct_p, cr_p = self._segmentation_pose_branch(
-                scene_with_pos, pred_hard, model_tokens.clone(), tag="pred_mask"
-            )
-            trans_g, rot_g, ct_g, cr_g = self._segmentation_pose_branch(
-                scene_with_pos, mask_gt_tok, model_tokens.clone(), tag="gt_mask"
-            )
-            return {
-                "translation": trans_p,
-                "rotation_6d": None,
-                "pred_t": trans_p,
-                "pred_R": rot_p,
-                "confidence_t": ct_p,
-                "confidence_r": cr_p,
-                "pred_t_gt_mask": trans_g,
-                "pred_R_gt_mask": rot_g,
-                "confidence_t_gt_mask": ct_g,
-                "confidence_r_gt_mask": cr_g,
-                "mask_logits": mask_logits,
-                "mask_gt_tokens": mask_gt_tok,
-            }
-
-        if train and self.segmentation.train_pose_with_gt_mask and mask_gt_tok is not None:
-            gate = mask_gt_tok
-        else:
-            gate = pred_hard
-
-        translation, rotation, confidence_t, confidence_r = self._segmentation_pose_branch(
-            scene_with_pos, gate, model_tokens, tag="train" if train else "pred_mask"
-        )
+        scene_global = self.scene_pool(scene_tokens)
+        model_global = self.model_pool(model_tokens)
+        fused = torch.cat([scene_global, model_global], dim=-1)
+        translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
         return {
             "translation": translation,
             "rotation_6d": None,
@@ -554,8 +454,6 @@ class HybridPoseNet(nn.Module):
             "pred_R": rotation,
             "confidence_t": confidence_t,
             "confidence_r": confidence_r,
-            "mask_logits": mask_logits,
-            "mask_gt_tokens": mask_gt_tok,
         }
 
 

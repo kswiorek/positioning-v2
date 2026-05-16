@@ -1,15 +1,15 @@
 {
   "seed": 12345,
-  "output_dir": "data/generated/dataset_glider_small",
+  "output_dir": "data/generated/dataset_glider",
   "background_glob": "data/backgrounds/raw/**/depth/*.npz",
   "num_samples": 25000,
   "train_validation_split": {
-    "train": 0.75,
-    "val": 0.25
+    "train": 0.80,
+    "val": 0.2
   },
   "workers": 10,
   "samples_per_task": 5,
-  "max_backgrounds_in_ram": 200,
+  "max_backgrounds_in_ram": 300,
   "stl_chunk_size": 256,
   "object_source": "random",
   "debug_metadata": false,

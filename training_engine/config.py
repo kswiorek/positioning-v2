@@ -79,22 +79,14 @@ class FusionConfig:
 
 @dataclass(frozen=True)
 class SegmentationConfig:
-    """Optional scene foreground mask: supervise a head and mask HybridPool on scene tokens."""
+    """When enabled, multiply depth by the GT object mask before the scene encoder."""
 
     enabled: bool = False
-    loss_weight: float = 1.0
-    # When True, training uses the GT mask to gate scene tokens (zeroing + pooling) before/at fusion.
-    # When False, training uses the predicted hard mask end-to-end for that path.
-    train_pose_with_gt_mask: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "SegmentationConfig":
         data = data or {}
-        return cls(
-            enabled=bool(data.get("enabled", False)),
-            loss_weight=float(data.get("loss_weight", 1.0)),
-            train_pose_with_gt_mask=bool(data.get("train_pose_with_gt_mask", True)),
-        )
+        return cls(enabled=bool(data.get("enabled", False)))
 
 
 @dataclass(frozen=True)
