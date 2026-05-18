@@ -195,3 +195,13 @@ def pose_loss(
         result["loss"] = total_loss
     
     return result
+
+
+def scene_mask_bce_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """BCE-with-logits for per-scene-token masks. ``logits`` / ``target`` are [B, N]."""
+    with torch.autocast(device_type=logits.device.type, enabled=False):
+        return F.binary_cross_entropy_with_logits(
+            logits.float(),
+            target.to(device=logits.device, dtype=torch.float32),
+            reduction="mean",
+        )

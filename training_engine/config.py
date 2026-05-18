@@ -78,6 +78,18 @@ class FusionConfig:
 
 
 @dataclass(frozen=True)
+class SegmentationConfig:
+    """When enabled, multiply depth by the GT object mask before the scene encoder."""
+
+    enabled: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "SegmentationConfig":
+        data = data or {}
+        return cls(enabled=bool(data.get("enabled", False)))
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     scene_encoder: SceneEncoderConfig = field(default_factory=SceneEncoderConfig)
     point_encoder: PointEncoderConfig = field(default_factory=PointEncoderConfig)
@@ -153,8 +165,6 @@ class LossConfig:
 @dataclass(frozen=True)
 class MonitoringConfig:
     log_every_n_batches: int = 10
-    quick_validation_every_n_train_batches: int = 0
-    quick_validation_batches: int = 8
     tensorboard: bool = True
 
     @classmethod
@@ -162,8 +172,6 @@ class MonitoringConfig:
         data = data or {}
         return cls(
             log_every_n_batches=int(data.get("log_every_n_batches", 10)),
-            quick_validation_every_n_train_batches=int(data.get("quick_validation_every_n_train_batches", 0)),
-            quick_validation_batches=int(data.get("quick_validation_batches", 8)),
             tensorboard=bool(data.get("tensorboard", True)),
         )
 
@@ -177,6 +185,12 @@ class DatasetConfig:
     cache_file: Path | None = None
     num_points: int = 0
     depth_max_m: float = 5.0
+    # "random": uniform subset per __getitem__. "fps": farthest-point greedy subsampling.
+    model_points_sampling: str = "random"
+    # When FPS is used and raw N exceeds this cap, uniformly pre-subsample (then FPS → num_points).
+    model_points_fps_cap: int = 8192
+    # Key in each sample `.npz` for the object mask: [H,W] or [1,H,W], same grid as depth.
+    mask_npz_key: str = "object_mask"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "DatasetConfig":
@@ -185,6 +199,9 @@ class DatasetConfig:
         storage = str(data.get("storage", "ram")).lower()
         if storage not in {"ram", "disk"}:
             raise ValueError("dataset.storage must be either 'ram' or 'disk'")
+        sampling = str(data.get("model_points_sampling", "random")).lower()
+        if sampling not in {"random", "fps"}:
+            raise ValueError("dataset.model_points_sampling must be 'random' or 'fps'")
         return cls(
             dataset_dir=dataset_dir,
             train_split=str(data.get("train_split", "train")),
@@ -193,6 +210,9 @@ class DatasetConfig:
             cache_file=None if data.get("cache_file") in (None, "") else _coerce_path(data.get("cache_file")),
             num_points=int(data.get("num_points", 0)),
             depth_max_m=float(data.get("depth_max_m", 5.0)),
+            model_points_sampling=sampling,
+            model_points_fps_cap=int(data.get("model_points_fps_cap", 8192)),
+            mask_npz_key=str(data.get("mask_npz_key", "object_mask")),
         )
 
 
@@ -201,6 +221,7 @@ class TrainingConfig:
     run_dir: Path
     model: ModelConfig = field(default_factory=ModelConfig)
     dataset: DatasetConfig = field(default_factory=lambda: DatasetConfig(dataset_dir=Path("data/generated/dataset_v2")))
+    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     loss: LossConfig = field(default_factory=LossConfig)
@@ -214,6 +235,7 @@ class TrainingConfig:
     grad_clip_norm: float = 1.0
     resume_from: Path | None = None
     resume_best: bool = False
+    resume_latest: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainingConfig":
@@ -222,6 +244,7 @@ class TrainingConfig:
             run_dir=_coerce_path(data.get("run_dir", "runs/default")),
             model=ModelConfig.from_dict(data.get("model")),
             dataset=DatasetConfig.from_dict(data.get("dataset")),
+            segmentation=SegmentationConfig.from_dict(data.get("segmentation")),
             optimizer=OptimizerConfig.from_dict(data.get("optimizer")),
             scheduler=SchedulerConfig.from_dict(data.get("scheduler")),
             loss=LossConfig.from_dict(data.get("loss")),
@@ -235,4 +258,5 @@ class TrainingConfig:
             grad_clip_norm=float(data.get("grad_clip_norm", 1.0)),
             resume_from=None if resume_from in (None, "") else _coerce_path(resume_from),
             resume_best=bool(data.get("resume_best", False)),
+            resume_latest=bool(data.get("resume_latest", False)),
         )

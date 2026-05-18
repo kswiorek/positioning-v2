@@ -27,7 +27,10 @@ def main() -> None:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume from the checkpoint configured in the JSON file",
+        help=(
+            "Load weights and optimizer state before training: uses resume_from from JSON if set; "
+            "otherwise checkpoints/latest.pth under run_dir"
+        ),
     )
     args = parser.parse_args()
 
@@ -37,9 +40,19 @@ def main() -> None:
 
     engine = TrainingEngine(config=config, model=model)
 
-    resume_path = config.resume_from
-    if args.resume and resume_path is not None and resume_path.exists():
-        load_and_resume(engine, resume_path)
+    if args.resume:
+        resume_path = config.resume_from
+        if resume_path is not None:
+            if resume_path.exists():
+                load_and_resume(engine, resume_path)
+            else:
+                print(f"Warning: --resume but resume_from path does not exist: {resume_path}")
+        else:
+            latest_path = engine.checkpoint_dir / "latest.pth"
+            if latest_path.exists():
+                load_and_resume(engine, latest_path)
+            else:
+                print(f"Warning: --resume but no resume_from in config and missing {latest_path}")
 
     summary = engine.train()
     print(json.dumps(summary, indent=2, default=str))

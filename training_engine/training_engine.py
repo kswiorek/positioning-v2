@@ -34,7 +34,7 @@ try:
     from .config import TrainingConfig
     from .dataset import build_dataloaders
     from .geometry import coerce_pose_output
-    from .losses import PoseLossWeights, pose_loss
+    from .losses import pose_loss
     from .model import build_model
 except Exception:  # pragma: no cover - fallback for direct script execution
     import sys
@@ -44,7 +44,7 @@ except Exception:  # pragma: no cover - fallback for direct script execution
     from training_engine.config import TrainingConfig
     from training_engine.dataset import build_dataloaders
     from training_engine.geometry import coerce_pose_output
-    from training_engine.losses import PoseLossWeights, pose_loss
+    from training_engine.losses import pose_loss
     from training_engine.model import build_model
 
 
@@ -89,6 +89,7 @@ class TrainingEngine:
         self.checkpoint_dir = self.run_dir / "checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.run_dir / "training_log.csv"
+        self.high_loss_samples_path = self.run_dir / "high_loss_samples.txt"
         self.monitoring = config.monitoring
         self.device = torch.device(config.device if torch.cuda.is_available() or config.device != "cuda" else "cpu")
 
@@ -97,6 +98,9 @@ class TrainingEngine:
         if self.train_loader is None or self.val_loader is None:
             self.train_loader, self.val_loader = build_dataloaders(config)
 
+        td = self.train_loader.dataset
+        self._train_dataset_for_epoch_hook = td if hasattr(td, "set_epoch") else None
+
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=config.optimizer.learning_rate,
@@ -104,11 +108,7 @@ class TrainingEngine:
         )
         self.scheduler = self._build_scheduler()
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.device.type == "cuda")
-        self.loss_weights = PoseLossWeights(
-            translation_weight=config.loss.translation_weight,
-            rotation_weight=config.loss.rotation_weight,
-            bbox_corner_weight=config.loss.bbox_corner_weight,
-        )
+        self.loss_weights = config.loss
         self.best_val_loss = math.inf
         self.start_epoch = 0
         self.global_step = 0
@@ -125,6 +125,10 @@ class TrainingEngine:
             best_checkpoint = self.checkpoint_dir / "best.pth"
             if best_checkpoint.exists():
                 load_and_resume(self, best_checkpoint)
+        elif self.config.resume_latest:
+            latest_checkpoint = self.checkpoint_dir / "latest.pth"
+            if latest_checkpoint.exists():
+                load_and_resume(self, latest_checkpoint)
 
     def _write_config_snapshot(self) -> None:
         snapshot = {
@@ -232,13 +236,17 @@ class TrainingEngine:
         for key, value in metrics.items():
             self.writer.add_scalar(f"{phase}/{key}", value, step)
 
-    def _move_batch(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
-        return {
+    def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {
             "depth": batch["depth"].to(self.device, non_blocking=True),
             "model_points": batch["model_points"].to(self.device, non_blocking=True),
             "gt_transform": batch["gt_transform"].to(self.device, non_blocking=True),
             "bbox_corners": batch["bbox_corners"].to(self.device, non_blocking=True),
+            "sample_id": batch.get("sample_id"),
         }
+        if "scene_mask" in batch:
+            out["scene_mask"] = batch["scene_mask"].to(self.device, non_blocking=True)
+        return out
 
     def _run_epoch(
         self,
@@ -266,14 +274,24 @@ class TrainingEngine:
         start_time = time.perf_counter()
         total_batches = len(loader) if hasattr(loader, "__len__") else None
 
+        seg_cfg = self.config.segmentation
         with context:
             for batch_idx, batch in enumerate(loader, start=1):
                 batch = self._move_batch(batch)
                 with torch.amp.autocast(device_type=self.device.type, enabled=use_amp):
-                    model_output = self.model(batch["depth"], batch["model_points"])
+                    if seg_cfg.enabled:
+                        if "scene_mask" not in batch:
+                            raise ValueError("segmentation.enabled requires batches to include 'scene_mask'")
+                        model_output = self.model(
+                            batch["depth"],
+                            batch["model_points"],
+                            batch["scene_mask"],
+                        )
+                    else:
+                        model_output = self.model(batch["depth"], batch["model_points"])
+
                     pred_transform = coerce_pose_output(model_output)
                     _check_finite("pred_transform", pred_transform, epoch=epoch, batch_idx=batch_idx, phase=phase)
-                    # Extract confidence predictions if available
                     pred_conf_t = model_output.get("confidence_t")
                     pred_conf_r = model_output.get("confidence_r")
                     loss_dict = pose_loss(
@@ -284,6 +302,14 @@ class TrainingEngine:
                         pred_conf_r=pred_conf_r,
                         weights=self.loss_weights,
                     )
+
+                    batch_loss = float(loss_dict["loss"].detach().cpu())
+                    if batch_loss > 100:
+                        sample_ids = batch.get("sample_id")
+                        with self.high_loss_samples_path.open("a", encoding="utf-8") as f:
+                            f.write(
+                                f"epoch={epoch + 1} batch={batch_idx} phase={phase} loss={batch_loss:.2f} samples={sample_ids}\n"
+                            )
 
                 if train:
                     self.optimizer.zero_grad(set_to_none=True)
@@ -300,7 +326,8 @@ class TrainingEngine:
 
                 for key in totals:
                     if key in loss_dict:
-                        totals[key] += float(loss_dict[key].detach().cpu())
+                        v = loss_dict[key]
+                        totals[key] += float(v.detach().cpu()) if torch.is_tensor(v) else float(v)
                 n_batches += 1
                 if train:
                     self.global_step += 1
@@ -308,40 +335,6 @@ class TrainingEngine:
                 running = {key: totals[key] / n_batches for key in totals}
                 elapsed_s = time.perf_counter() - start_time
                 self._log_batch_progress(phase, epoch, batch_idx, total_batches, elapsed_s, running)
-
-                if train:
-                    batch_metrics = dict(running)
-                    batch_metrics["lr"] = self._current_lr()
-                    self._write_tensorboard_scalars("batch", self.global_step, batch_metrics)
-
-                    interval = self.monitoring.quick_validation_every_n_train_batches
-                    if interval > 0 and self.monitoring.quick_validation_batches > 0 and self.global_step % interval == 0:
-                        quick_metrics = self._run_epoch(
-                            self.val_loader,
-                            train=False,
-                            epoch=epoch,
-                            phase="quick_val",
-                            max_batches=self.monitoring.quick_validation_batches,
-                        )
-                        quick_row = _metrics_to_row("quick_val", epoch, quick_metrics, self._current_lr())
-                        self._write_tensorboard_scalars(
-                            "quick_val",
-                            self.global_step,
-                            {
-                                "loss": quick_metrics.loss,
-                                "translation": quick_metrics.translation,
-                                "rotation": quick_metrics.rotation,
-                                "bbox_corner": quick_metrics.bbox_corner,
-                                "rotation_error_deg": quick_metrics.rotation_error_deg,
-                                "confidence": quick_metrics.confidence,
-                            },
-                        )
-                        print(
-                            f"quick_val step {self.global_step}: loss={quick_metrics.loss:.4f}, "
-                            f"trans={quick_metrics.translation:.4f}, rot={quick_metrics.rotation:.4f}",
-                            flush=True,
-                        )
-                        self._append_log_row(quick_row)
 
                 if max_batches is not None and batch_idx >= max_batches:
                     break
@@ -379,6 +372,9 @@ class TrainingEngine:
             if self.config.scheduler.warmup_epochs > 0 and epoch < self.config.scheduler.warmup_epochs:
                 self._set_warmup_lr(epoch)
 
+            if self._train_dataset_for_epoch_hook is not None:
+                self._train_dataset_for_epoch_hook.set_epoch(epoch)
+
             train_metrics = self._run_epoch(self.train_loader, train=True, epoch=epoch, phase="train")
             val_metrics = self._run_epoch(self.val_loader, train=False, epoch=epoch, phase="val")
 
@@ -388,32 +384,33 @@ class TrainingEngine:
             self._append_log_row(train_row)
             self._append_log_row(val_row)
 
-            self._write_tensorboard_scalars(
-                "epoch/train",
-                epoch + 1,
-                {
-                    "loss": train_metrics.loss,
-                    "translation": train_metrics.translation,
-                    "rotation": train_metrics.rotation,
-                    "bbox_corner": train_metrics.bbox_corner,
-                    "rotation_error_deg": train_metrics.rotation_error_deg,
-                    "confidence": train_metrics.confidence,
-                },
-            )
-            self._write_tensorboard_scalars(
-                "epoch/val",
-                epoch + 1,
-                {
-                    "loss": val_metrics.loss,
-                    "translation": val_metrics.translation,
-                    "rotation": val_metrics.rotation,
-                    "bbox_corner": val_metrics.bbox_corner,
-                    "rotation_error_deg": val_metrics.rotation_error_deg,
-                    "confidence": val_metrics.confidence,
-                },
-            )
+            tb_step = epoch + 1
             if self.writer is not None:
-                self.writer.add_scalar("epoch/lr", current_lr, epoch + 1)
+                self._write_tensorboard_scalars(
+                    "train_epoch",
+                    tb_step,
+                    {
+                        "loss": train_metrics.loss,
+                        "translation": train_metrics.translation,
+                        "rotation": train_metrics.rotation,
+                        "bbox_corner": train_metrics.bbox_corner,
+                        "rotation_error_deg": train_metrics.rotation_error_deg,
+                        "confidence": train_metrics.confidence,
+                        "lr": current_lr,
+                    },
+                )
+                self._write_tensorboard_scalars(
+                    "val_epoch",
+                    tb_step,
+                    {
+                        "loss": val_metrics.loss,
+                        "translation": val_metrics.translation,
+                        "rotation": val_metrics.rotation,
+                        "bbox_corner": val_metrics.bbox_corner,
+                        "rotation_error_deg": val_metrics.rotation_error_deg,
+                        "confidence": val_metrics.confidence,
+                    },
+                )
 
             latest_path = self.checkpoint_dir / "latest.pth"
             save_checkpoint(

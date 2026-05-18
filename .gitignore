@@ -7,3 +7,5 @@ data/exported/*
 data/stl/*
 data/stl_processed/*
 data/generated/dataset/*
+runs/**/tensorboard/*
+.idea/

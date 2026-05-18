@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import ModelConfig, TrainingConfig
+from .config import ModelConfig, SegmentationConfig, TrainingConfig
 from .geometry import rotation_6d_to_matrix
 
 
@@ -99,10 +99,10 @@ class SceneEncoder(nn.Module):
         self.proj = nn.Conv2d(in_ch, feature_dim, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, tuple[int, int]]:
-        x = self.stem(x)
-        _check_finite("SceneEncoder.stem", x)
         with torch.autocast(device_type=x.device.type, enabled=False):
-            x = x.to(dtype=torch.float32)
+            x = self.stem(x)
+            _check_finite("SceneEncoder.stem", x)
+            # x = x.to(dtype=torch.float32)
             x = self.blocks(x)
             x = self.proj(x)
             B, C, H, W = x.shape
@@ -246,7 +246,7 @@ class AttentionPool(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        B = tokens.shape[0]
+        B, _, _ = tokens.shape
         t = self.norm(tokens)
         _check_finite("AttentionPool.norm", t)
         q = self.query.expand(B, -1, -1)
@@ -274,7 +274,10 @@ class HybridPool(nn.Module):
         attn_f = self.attn_pool(tokens)
         fused = torch.cat([mean_f, max_f, attn_f], dim=-1)
         _check_finite("HybridPool.fused", fused)
-        out = self.norm(F.gelu(self.proj(fused)))
+        with torch.autocast(device_type=fused.device.type, enabled=False):
+            fused = fused.to(dtype=torch.float32)
+            out = self.norm(F.gelu(self.proj(fused)))
+            out = out.to(dtype=tokens.dtype)
         _check_finite("HybridPool.out", out)
         return out
 
@@ -330,12 +333,20 @@ class PoseHead(nn.Module):
 class HybridPoseNet(nn.Module):
     """Hybrid CNN + DGCNN pose estimation network."""
 
-    def __init__(self, config: ModelConfig, camera_config: dict | None = None):
+    def __init__(
+        self,
+        config: ModelConfig,
+        segmentation: SegmentationConfig | None = None,
+        camera_config: dict | None = None,
+    ):
         super().__init__()
-        camera_config = camera_config or {}
+        _ = camera_config or {}
         se_cfg = config.scene_encoder
         me_cfg = config.point_encoder
         feat_dim = se_cfg.feature_dim
+
+        self.segmentation = segmentation or SegmentationConfig(enabled=False)
+        self.use_segmentation = bool(self.segmentation.enabled)
 
         self.scene_encoder = SceneEncoder(
             base_channels=se_cfg.base_channels,
@@ -397,35 +408,44 @@ class HybridPoseNet(nn.Module):
             enc = F.pad(enc, (0, dim - enc.shape[-1]))
         return enc[:, :dim]
 
-    def forward(self, depth: torch.Tensor, model_points: torch.Tensor):
-        scene_tokens, (H, W) = self.scene_encoder(depth)
+    def forward(
+        self,
+        depth: torch.Tensor,
+        model_points: torch.Tensor,
+        scene_mask: torch.Tensor | None = None,
+    ) -> dict[str, Any]:
+        if self.use_segmentation:
+            if scene_mask is None:
+                raise ValueError("segmentation.enabled requires scene_mask")
+            depth = depth * scene_mask.clamp(0.0, 1.0)
+            _check_finite("HybridPoseNet.masked_depth", depth)
+
+        scene_raw, (H, W) = self.scene_encoder(depth)
         model_tokens = self.model_encoder(model_points)
-        _check_finite("HybridPoseNet.scene_tokens", scene_tokens)
+        _check_finite("HybridPoseNet.scene_tokens", scene_raw)
         _check_finite("HybridPoseNet.model_tokens", model_tokens)
-        
-        # Build or use cached pos encoding based on current H, W
+
         key = (H, W)
-        if key not in getattr(self, "_pos_cache", {}) or self._pos_cache[key].device != scene_tokens.device:
-            pos = self._build_2d_sincos_pos_encoding(H, W, scene_tokens.shape[-1])
+        if key not in getattr(self, "_pos_cache", {}) or self._pos_cache[key].device != scene_raw.device:
+            pos = self._build_2d_sincos_pos_encoding(H, W, scene_raw.shape[-1])
             if not hasattr(self, "_pos_cache"):
                 self._pos_cache = {}
-            self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_tokens.device, dtype=scene_tokens.dtype)
-            
-        scene_pos = self._pos_cache[key]
-        scene_tokens = scene_tokens + scene_pos
+            self._pos_cache[key] = pos.unsqueeze(0).to(device=scene_raw.device, dtype=scene_raw.dtype)
+
+        scene_tokens = scene_raw + self._pos_cache[key]
         _check_finite("HybridPoseNet.scene_tokens+pos", scene_tokens)
-        
-        model_pos = self.model_coord_proj(model_points.to(model_tokens.dtype))
-        model_tokens = model_tokens + model_pos
+
+        model_tokens = model_tokens + self.model_coord_proj(model_points.to(model_tokens.dtype))
         _check_finite("HybridPoseNet.model_tokens+pos", model_tokens)
+
         for layer in self.cross_attention:
             scene_tokens, model_tokens = layer(scene_tokens, model_tokens)
             _check_finite("HybridPoseNet.scene_tokens.attn", scene_tokens)
             _check_finite("HybridPoseNet.model_tokens.attn", model_tokens)
+
         scene_global = self.scene_pool(scene_tokens)
         model_global = self.model_pool(model_tokens)
         fused = torch.cat([scene_global, model_global], dim=-1)
-        _check_finite("HybridPoseNet.fused", fused)
         translation, rotation, confidence_t, confidence_r = self.pose_head(fused)
         return {
             "translation": translation,
@@ -442,4 +462,4 @@ def build_model(config: TrainingConfig) -> HybridPoseNet:
         "padded_height": 256,
         "resolution": {"width": 320, "height": 240},
     }
-    return HybridPoseNet(config.model, camera_config=camera_config)
+    return HybridPoseNet(config.model, segmentation=config.segmentation, camera_config=camera_config)

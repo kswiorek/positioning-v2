@@ -9,7 +9,7 @@ import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,205 @@ _WORKER_BG_IDS: list[str] = []
 _WORKER_STL_ASSETS: dict[str, Any] = {}
 
 
+def _perlin_fade(t: np.ndarray) -> np.ndarray:
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+
+
+def _perlin_lerp(t: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return a + t * (b - a)
+
+
+def _perlin_grad(h: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    h = h & 3
+    u = np.where(h < 2, x, y)
+    v = np.where(h < 2, y, x)
+    return np.where((h & 1) == 0, u, -u) + np.where((h & 2) == 0, v, -v)
+
+
+def _perlin_noise_batch(x: np.ndarray, y: np.ndarray, p: np.ndarray) -> np.ndarray:
+    xi = np.floor(x).astype(np.int32) & 255
+    yi = np.floor(y).astype(np.int32) & 255
+    xf = x - np.floor(x)
+    yf = y - np.floor(y)
+    u = _perlin_fade(xf)
+    v = _perlin_fade(yf)
+
+    a = p[xi] + yi
+    aa = p[a]
+    ab = p[a + 1]
+    b = p[xi + 1] + yi
+    ba = p[b]
+    bb = p[b + 1]
+
+    return _perlin_lerp(
+        v,
+        _perlin_lerp(u, _perlin_grad(p[aa], xf, yf), _perlin_grad(p[ba], xf - 1.0, yf)),
+        _perlin_lerp(u, _perlin_grad(p[ab], xf, yf - 1.0), _perlin_grad(p[bb], xf - 1.0, yf - 1.0)),
+    )
+
+
+def _sample_background_weights(scene_cfg: dict[str, Any]) -> dict[str, float]:
+    cfg = scene_cfg.get("background_sources", {})
+    weights_cfg = cfg.get("weights", {})
+    real_w = float(weights_cfg.get("real", 1.0))
+    perlin_w = float(weights_cfg.get("perlin", 0.0))
+    blank_w = float(weights_cfg.get("blank", 0.0))
+    real_w = max(real_w, 0.0)
+    perlin_w = max(perlin_w, 0.0)
+    blank_w = max(blank_w, 0.0)
+    total = real_w + perlin_w + blank_w
+    if total <= 0.0:
+        return {"real": 1.0, "perlin": 0.0, "blank": 0.0}
+    return {
+        "real": float(real_w / total),
+        "perlin": float(perlin_w / total),
+        "blank": float(blank_w / total),
+    }
+
+
+def _generate_perlin_background(camera_cfg: dict[str, Any], perlin_cfg: dict[str, Any], seed: int) -> np.ndarray:
+    cam_res = camera_cfg.get("resolution", {})
+    width = int(cam_res.get("width", 0))
+    height = int(cam_res.get("height", 0))
+    if width <= 0 or height <= 0:
+        raise ValueError("camera.resolution.width and camera.resolution.height must be > 0")
+
+    rng = np.random.default_rng(int(seed))
+
+    base_range = perlin_cfg.get("base_depth_m_range", [2.0, 2.0])
+    amp_range = perlin_cfg.get("amplitude_m_range", [0.15, 0.15])
+    scale_range = perlin_cfg.get("noise_scale_range", [2.5, 2.5])
+    octaves_range = perlin_cfg.get("octaves_range", [4, 4])
+    persistence = float(perlin_cfg.get("persistence", 0.5))
+
+    base_lo, base_hi = float(base_range[0]), float(base_range[1])
+    amp_lo, amp_hi = float(amp_range[0]), float(amp_range[1])
+    scale_lo, scale_hi = float(scale_range[0]), float(scale_range[1])
+    oct_lo, oct_hi = int(octaves_range[0]), int(octaves_range[1])
+    if base_hi < base_lo:
+        base_lo, base_hi = base_hi, base_lo
+    if amp_hi < amp_lo:
+        amp_lo, amp_hi = amp_hi, amp_lo
+    if scale_hi < scale_lo:
+        scale_lo, scale_hi = scale_hi, scale_lo
+    if oct_hi < oct_lo:
+        oct_lo, oct_hi = oct_hi, oct_lo
+
+    base_depth = float(rng.uniform(base_lo, base_hi)) if base_hi > base_lo else base_lo
+    amplitude = float(rng.uniform(amp_lo, amp_hi)) if amp_hi > amp_lo else amp_lo
+    noise_scale = float(rng.uniform(scale_lo, scale_hi)) if scale_hi > scale_lo else scale_lo
+    octaves = int(rng.integers(oct_lo, oct_hi + 1)) if oct_hi > oct_lo else oct_lo
+    octaves = max(octaves, 1)
+
+    p0 = rng.permutation(256).astype(np.int32)
+    p = np.concatenate([p0, p0])
+
+    xv = np.linspace(-1.0, 1.0, width, dtype=np.float32)
+    yv = np.linspace(-1.0, 1.0, height, dtype=np.float32)
+    xx, yy = np.meshgrid(xv, yv)
+    x = xx * noise_scale
+    y = yy * noise_scale
+
+    total = np.zeros_like(x, dtype=np.float32)
+    freq = 1.0
+    amp = 1.0
+    amp_sum = 0.0
+    for _ in range(octaves):
+        total += _perlin_noise_batch(x * freq, y * freq, p).astype(np.float32) * amp
+        amp_sum += amp
+        amp *= persistence
+        freq *= 2.0
+    noise = total / max(amp_sum, 1e-8)
+
+    depth = base_depth + amplitude * noise
+    return np.maximum(depth, 0.05).astype(np.float32)
+
+
+def _sample_background_depth(
+    scene_cfg: dict[str, Any],
+    camera_cfg: dict[str, Any],
+    rng_master: np.random.Generator,
+    forced_source: str | None = None,
+) -> tuple[np.ndarray, str, str]:
+    weights = _sample_background_weights(scene_cfg)
+    if len(_WORKER_BG_DEPTHS) == 0 and (weights["real"] > 0.0 or forced_source == "real"):
+        raise RuntimeError("Background source 'real' has non-zero weight but no real backgrounds were loaded.")
+    if forced_source is not None:
+        source = str(forced_source).strip().lower()
+        if source not in {"real", "perlin", "blank"}:
+            raise ValueError(f"Unsupported forced background source: {forced_source!r}")
+    else:
+        u = float(rng_master.random())
+        if u < weights["real"]:
+            source = "real"
+        elif u < weights["real"] + weights["perlin"]:
+            source = "perlin"
+        else:
+            source = "blank"
+
+    if source == "real":
+        bg_idx = int(rng_master.integers(0, len(_WORKER_BG_DEPTHS)))
+        bg_depth = _WORKER_BG_DEPTHS[bg_idx]
+        bg_id = _WORKER_BG_IDS[bg_idx]
+        return bg_depth, bg_id, "real"
+
+    if source == "perlin":
+        perlin_cfg = scene_cfg.get("background_sources", {}).get("perlin", {})
+        perlin_seed = int(rng_master.integers(0, 2**31 - 1))
+        bg_depth = _generate_perlin_background(camera_cfg=camera_cfg, perlin_cfg=perlin_cfg, seed=perlin_seed)
+        return bg_depth, f"synthetic_perlin:{perlin_seed}", "perlin"
+
+    cam_res = camera_cfg.get("resolution", {})
+    width = int(cam_res.get("width", 0))
+    height = int(cam_res.get("height", 0))
+    blank_depth_value_m = float(scene_cfg.get("background_sources", {}).get("blank", {}).get("depth_value_m", 0.0))
+    blank = np.full((height, width), blank_depth_value_m, dtype=np.float32)
+    return blank, f"synthetic_blank:{blank_depth_value_m:.4f}", "blank"
+
+
+def _counts_from_weights(weights: dict[str, float], n_total: int, rng: np.random.Generator) -> dict[str, int]:
+    keys = ["real", "perlin", "blank"]
+    expected = {k: float(weights.get(k, 0.0)) * float(n_total) for k in keys}
+    counts = {k: int(math.floor(expected[k])) for k in keys}
+    remaining = int(n_total - sum(counts.values()))
+    if remaining > 0:
+        order = list(keys)
+        rng.shuffle(order)
+        order.sort(key=lambda k: expected[k] - counts[k], reverse=True)
+        for i in range(remaining):
+            counts[order[i % len(order)]] += 1
+    return counts
+
+
+def _assign_background_sources_stratified(
+    sample_plans: list["SamplePlan"],
+    background_weights: dict[str, float],
+    seed: int,
+) -> list["SamplePlan"]:
+    if not sample_plans:
+        return sample_plans
+
+    rng = np.random.default_rng(int(seed))
+    plans_out = list(sample_plans)
+    by_object_source: dict[str, list[int]] = {}
+    for idx, plan in enumerate(sample_plans):
+        by_object_source.setdefault(plan.source, []).append(idx)
+
+    for _, indices in by_object_source.items():
+        local_indices = list(indices)
+        local_rng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
+        local_rng.shuffle(local_indices)
+        counts = _counts_from_weights(background_weights, len(local_indices), local_rng)
+
+        cursor = 0
+        for bg_source in ("real", "perlin", "blank"):
+            n = counts[bg_source]
+            for idx in local_indices[cursor : cursor + n]:
+                plans_out[idx] = replace(plans_out[idx], background_source=bg_source)
+            cursor += n
+    return plans_out
+
+
 @dataclass(frozen=True)
 class SamplePlan:
     sample_index: int
@@ -41,6 +240,7 @@ class SamplePlan:
     source: str
     shape_seed: int
     allow_truncation: bool
+    background_source: str | None = None
     stl_path: str | None = None
     stl_chunk_id: int | None = None
 
@@ -251,11 +451,16 @@ def _generate_sample_from_plan(
         sample_seed = plan.sample_seed if attempt == 0 else _seed_for_sample(plan.sample_seed, plan.sample_index, attempt)
         rng_master = np.random.default_rng(sample_seed)
 
-        bg_idx = int(rng_master.integers(0, len(_WORKER_BG_DEPTHS)))
-        background_depth_raw = _WORKER_BG_DEPTHS[bg_idx]
-        background_id = _WORKER_BG_IDS[bg_idx]
+        background_depth_raw, background_id, background_source = _sample_background_depth(
+            scene_cfg=scene_cfg,
+            camera_cfg=camera_cfg,
+            rng_master=rng_master,
+            forced_source=plan.background_source,
+        )
 
-        norm_enabled = bool(bg_norm_cfg.get("enabled", True))
+        norm_enabled_cfg = bool(bg_norm_cfg.get("enabled", True))
+        bg_has_valid_depth = bool(np.any(np.isfinite(background_depth_raw) & (background_depth_raw > 1e-6)))
+        norm_enabled = bool(norm_enabled_cfg and bg_has_valid_depth)
         if norm_enabled:
             bg_rng = np.random.default_rng(int(rng_master.integers(0, 2**31 - 1)))
             background_depth, bg_transform = normalize_and_randomize_background_depth(
@@ -398,6 +603,9 @@ def _generate_sample_from_plan(
             rng=artifacts_rng,
         )
 
+        # Binary mask in image space: object has valid rendered depth (same grid as composite_depth).
+        object_mask = (np.isfinite(object_depth) & (object_depth > 0.0)).astype(np.float32)
+
         sample_id = f"{plan.sample_index:06d}"
         out_path = Path(out_samples_dir) / f"{sample_id}.npz"
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,11 +616,13 @@ def _generate_sample_from_plan(
                 "background_depth_m": background_depth.astype(np.float32),
                 "object_depth_m": object_depth.astype(np.float32),
                 "composite_depth_m": composite_depth.astype(np.float32),
+                "object_mask": object_mask,
                 "model_points": model_points,
             }
         else:
             save_dict = {
                 "composite_depth_m": composite_depth.astype(np.float32),
+                "object_mask": object_mask,
                 "model_points": model_points,
             }
 
@@ -430,7 +640,8 @@ def _generate_sample_from_plan(
         domain_tags = [
             "depth",
             "synthetic_object",
-            "real_background_composite",
+            "background_composite",
+            f"background_source:{background_source}",
             f"object_source:{shape_params.get('object_source', 'unknown')}",
             "visibility:truncated" if plan.allow_truncation else "visibility:core",
         ]
@@ -445,6 +656,7 @@ def _generate_sample_from_plan(
             "object_asset_path": shape_params.get("object_asset_path", None),
             "background_id": background_id,
             "background_asset_path": background_id,
+            "background_source": background_source,
             "bbox_extent_m": bbox_extent.tolist(),
             "bbox_corners_m": bbox_corners.astype(np.float32).tolist(),
             "gt_transform_camera_from_object": t_cam_from_obj.tolist(),
@@ -456,6 +668,7 @@ def _generate_sample_from_plan(
             "success": True,
             "seed": plan.sample_seed,
             "background_id": background_id,
+            "background_source": background_source,
             "object_source": shape_params.get("object_source", "unknown"),
             "object_id": shape_params.get("object_id", ""),
             "object_asset_path": shape_params.get("object_asset_path", None),
@@ -572,7 +785,12 @@ def build_dataset(
     if stl_chunk_size <= 0:
         stl_chunk_size = 1
 
-    _load_background_cache(scene_cfg, background_paths, max_backgrounds_in_ram)
+    background_weights = _sample_background_weights(scene_cfg)
+    if background_weights["real"] > 0.0:
+        _load_background_cache(scene_cfg, background_paths, max_backgrounds_in_ram)
+    else:
+        _WORKER_BG_DEPTHS.clear()
+        _WORKER_BG_IDS.clear()
     place_cfg = scene_cfg.get("placement", {})
 
     stl_files = _list_stl_files(scene_cfg)
@@ -599,8 +817,6 @@ def build_dataset(
     )
 
     sample_plans: list[SamplePlan] = []
-    superquadric_plans: list[SamplePlan] = []
-    stl_plans_by_chunk: dict[int, list[SamplePlan]] = {}
     for sample_index in range(num_samples):
         plan = _build_sample_plan(
             sample_index=sample_index,
@@ -614,6 +830,14 @@ def build_dataset(
             allow_truncation=sample_index in truncation_indices,
         )
         sample_plans.append(plan)
+    sample_plans = _assign_background_sources_stratified(
+        sample_plans=sample_plans,
+        background_weights=background_weights,
+        seed=int(base_seed + 294117),
+    )
+    superquadric_plans: list[SamplePlan] = []
+    stl_plans_by_chunk: dict[int, list[SamplePlan]] = {}
+    for plan in sample_plans:
         if plan.source == "stl" and plan.stl_chunk_id is not None:
             stl_plans_by_chunk.setdefault(plan.stl_chunk_id, []).append(plan)
         else:
@@ -716,6 +940,7 @@ def build_dataset(
         "workers": workers,
         "samples_per_task": samples_per_task,
         "backgrounds_available": len(background_paths),
+        "background_source_weights": background_weights,
         "max_backgrounds_in_ram": max_backgrounds_in_ram,
         "debug_metadata": debug_metadata,
         "save_components": save_components,
@@ -755,7 +980,7 @@ def main() -> None:
 
     background_glob = str(dataset_cfg.get("background_glob", "data/backgrounds/raw/**/depth/*.npz"))
     background_paths = sorted(str(p) for p in Path(".").glob(background_glob) if p.is_file())
-    if not background_paths:
+    if not background_paths and _sample_background_weights(scene_cfg).get("real", 0.0) > 0.0:
         raise RuntimeError(f"No background files matched: {background_glob}")
 
     workers = int(dataset_cfg.get("workers", 0))
