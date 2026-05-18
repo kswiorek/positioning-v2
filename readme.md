@@ -32,6 +32,26 @@ The generator writes:
 Lean metadata format (single contract) is documented in
 `data_engine/config/dataset_schema.example.json`.
 
+## Export for legacy v1 training (`positioning`)
+
+Convert a v2 run into the flat NPZ layout expected by the original project
+(`depth_image`, `model_points`, `bbox_corners`, `gt_transform` under
+`train/` and `val/`):
+
+```bash
+python -m data_engine.convert_to_v1_dataset \
+  --input_dir data/generated/dataset_test \
+  --output_dir data/exported/v1_dataset \
+  --scene_config data_engine/config/scene_config.json
+```
+
+Optional: pass `--network_config` from the v1 repo so `metadata.json` matches
+what `generate_dataset.py` would have written. Use `--keep_sample_ids` to
+preserve v2 filenames instead of renumbering `000000`..`N-1`.
+
+Point the v1 `network_config.json` dataset path (or `train.py` `--dataset_dir`)
+at `--output_dir`.
+
 ## Training (Implemented)
 
 Train from a config file in the same style as dataset generation:

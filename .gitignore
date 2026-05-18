@@ -3,6 +3,7 @@ librealsense-2.53.1/*
 **/__pycache__/
 data/debug/*
 data/generated/*
+data/exported/*
 data/stl/*
 data/stl_processed/*
 data/generated/dataset/*
