@@ -31,6 +31,17 @@ def _transform_bbox_corners(corners: torch.Tensor,
     return out[:, :3, :].transpose(1, 2)               # [B, 8, 3]
 
 
+def _rotation_add_distance(
+    pred_R: torch.Tensor,
+    gt_R: torch.Tensor,
+    points: torch.Tensor,
+) -> torch.Tensor:
+    """Average 3D distance (ADD) under pred vs GT rotation. Returns [B] in meters."""
+    pred_pts = torch.bmm(points, pred_R.transpose(1, 2))
+    gt_pts = torch.bmm(points, gt_R.transpose(1, 2))
+    return torch.linalg.norm(pred_pts - gt_pts, dim=-1).mean(dim=-1)
+
+
 def _aabb_iou(corners1: torch.Tensor, corners2: torch.Tensor) -> torch.Tensor:
     """Compute AABB IoU from two [B,8,3] oriented-bbox corner sets. Returns [B]."""
     min1, max1 = corners1.min(dim=1)[0], corners1.max(dim=1)[0]  # [B, 3]
@@ -51,7 +62,7 @@ def confidence_loss(
     pred_conf_t: torch.Tensor,
     pred_conf_r: torch.Tensor,
     translation_error: torch.Tensor,
-    rotation_error_deg: torch.Tensor,
+    rotation_error: torch.Tensor,
     temperature: float = 1.0,
 ) -> dict[str, torch.Tensor]:
     """Train confidence heads as inverse of prediction error.
@@ -60,7 +71,7 @@ def confidence_loss(
         pred_conf_t: [B] predicted translation confidence in [0,1]
         pred_conf_r: [B] predicted rotation confidence in [0,1]
         translation_error: [B] translation L2 error in meters
-        rotation_error_deg: [B] rotation geodesic error in degrees
+        rotation_error: [B] rotation ADD error in meters
         temperature: scaling factor for exponential decay
     
     Returns:
@@ -68,7 +79,7 @@ def confidence_loss(
     """
     # Target: confidence = exp(-temperature * error)
     target_conf_t = torch.exp(-temperature * translation_error.detach())
-    target_conf_r = torch.exp(-temperature * (rotation_error_deg.detach() / 180.0))
+    target_conf_r = torch.exp(-temperature * rotation_error.detach())
     
     loss_t = F.mse_loss(pred_conf_t, target_conf_t)
     loss_r = F.mse_loss(pred_conf_r, target_conf_r)
@@ -90,8 +101,8 @@ def pose_loss(
 ) -> dict[str, torch.Tensor]:
     """Compute pose loss over translation, rotation, bbox corners, and confidence.
     
-    Uses axis-weighted translation loss, SO(3) surrogate rotation loss,
-    and 3D IoU bbox loss from the original project, plus optional confidence loss.
+    Uses axis-weighted translation loss, rotation ADD loss on bbox corners,
+    and 3D IoU bbox loss, plus optional confidence loss.
     
     Args:
         pred_transform: [B, 4, 4] predicted transformation matrices
@@ -137,19 +148,11 @@ def pose_loss(
     trans_sq_dist = ((pred_t - gt_t) ** 2).sum(dim=-1)
     trans_error = torch.sqrt(trans_sq_dist + 1e-6)  # [B]
 
-    # ── Rotation loss (smooth SO(3) surrogate: 1 - cos(theta)) ─────────────
-    # R_diff = pred_R^T @ gt_R is identity when perfect.
-    # trace(R_diff) = 1 + 2*cos(theta)  =>  cos(theta) = (trace - 1) / 2
-    # Use 1 - cos(theta) instead of acos(theta) for smoother gradients,
-    # especially near small angles while remaining geometry-aware on SO(3).
-    R_diff = torch.bmm(pred_R.transpose(1, 2), gt_R)            # [B, 3, 3]
-    trace = R_diff.diagonal(dim1=-2, dim2=-1).sum(dim=-1)      # [B]
-    # Clamp more aggressively to prevent numerical issues
-    cos_angle = torch.clamp((trace - 1.0) / 2.0, -0.9999, 0.9999)
-    rotation_loss = (1.0 - cos_angle).mean()
+    # ── Rotation loss (ADD on canonical bbox corners, rotation only) ─────────
+    rotation_add_error = _rotation_add_distance(pred_R, gt_R, bbox_corners)  # [B]
+    rotation_loss = rotation_add_error.mean()
     rotation_loss = torch.clamp(rotation_loss, max=1e4)
-    # Safe acos for rotation error logging
-    rotation_error_deg = torch.rad2deg(torch.acos(torch.clamp(cos_angle, -1.0, 1.0)))
+    rotation_error_deg = torch.rad2deg(rotation_geodesic_error(pred_R, gt_R))
 
     # ── BBox IoU loss ─────────────────────────────────────────────────────────
     pred_bbox = _transform_bbox_corners(bbox_corners, pred_transform)
@@ -177,7 +180,7 @@ def pose_loss(
     if pred_conf_t is not None and pred_conf_r is not None and conf_w > 0.0:
         conf_loss_dict = confidence_loss(
             pred_conf_t, pred_conf_r,
-            trans_error, rotation_error_deg,
+            trans_error, rotation_add_error,
             temperature=conf_temp,
         )
         total_loss = total_loss + conf_w * conf_loss_dict["loss"]

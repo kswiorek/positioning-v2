@@ -1,0 +1,16 @@
+{
+  "seed": 1,
+  "output_dir": "data/generated/_smoke_perlin_only",
+  "background_glob": "data/backgrounds/raw/**/depth/*.npz",
+  "num_samples": 2,
+  "train_validation_split": { "train": 1.0, "val": 0.0 },
+  "workers": 2,
+  "samples_per_task": 1,
+  "max_backgrounds_in_ram": 0,
+  "stl_chunk_size": 256,
+  "object_source": "superquadric",
+  "debug_metadata": false,
+  "save_components": false,
+  "compressed_npz": false,
+  "max_attempts_per_sample": 10
+}

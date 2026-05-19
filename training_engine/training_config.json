@@ -61,8 +61,8 @@
   },
   "loss": {
     "translation_weight": 7.0,
-    "rotation_weight": 5.0,
-    "bbox_corner_weight": 2.0,
+    "rotation_weight": 3.0,
+    "bbox_corner_weight": 0.0,
     "confidence_weight": 0.5,
     "confidence_temperature": 0.1,
     "translation_axis_weights": [1.0, 1.0, 1.0]

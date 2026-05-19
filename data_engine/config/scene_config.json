@@ -26,9 +26,9 @@
 
   "background_sources": {
     "weights": {
-      "real": 0.5,
-      "perlin": 0.25,
-      "blank": 0.25
+      "real": 0.0,
+      "perlin": 1.0,
+      "blank": 0.0
     },
     "perlin": {
       "base_depth_m_range": [2.0, 3.5],
@@ -51,8 +51,8 @@
     "source_selection": {
       "mode": "random",
       "weights": {
-        "superquadric": 0.2,
-        "stl": 0.8
+        "superquadric": 1.0,
+        "stl": 0.0
       }
     },
     "superquadric": {
@@ -101,7 +101,7 @@
 
   "camera_artifacts": {
     "enabled": true,
-    "apply_to_background": false,
+    "apply_to_background": true,
     "range_noise": {
       "enabled": true,
       "interaction_radius_px": 2,

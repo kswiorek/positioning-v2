@@ -1,0 +1,1046 @@
+{
+  "session_name": "session_20260515_120843",
+  "started_unix_s": 1778839726.909029,
+  "capture_config": {
+    "output_root": "data\\backgrounds\\raw",
+    "session_name": null,
+    "max_frames": 0,
+    "preview_max_depth_m": 5.0,
+    "save_preview_png": true
+  },
+  "camera": {
+    "backend": "realsense",
+    "width": 320,
+    "height": 240,
+    "fps": 30,
+    "enable_color": false,
+    "depth_scale_m": 0.0002500000118743628,
+    "intrinsics": {
+      "fx": 228.609375,
+      "fy": 228.66015625,
+      "cx": 169.25390625,
+      "cy": 123.9697265625,
+      "width": 320,
+      "height": 240
+    }
+  },
+  "frames": [
+    {
+      "frame_index": 0,
+      "frame_name": "frame_000000",
+      "timestamp_s": 252.78857,
+      "depth_file": "depth\\frame_000000.npz",
+      "preview_file": "preview\\frame_000000.png"
+    },
+    {
+      "frame_index": 1,
+      "frame_name": "frame_000001",
+      "timestamp_s": 253.452379,
+      "depth_file": "depth\\frame_000001.npz",
+      "preview_file": "preview\\frame_000001.png"
+    },
+    {
+      "frame_index": 2,
+      "frame_name": "frame_000002",
+      "timestamp_s": 253.817462,
+      "depth_file": "depth\\frame_000002.npz",
+      "preview_file": "preview\\frame_000002.png"
+    },
+    {
+      "frame_index": 3,
+      "frame_name": "frame_000003",
+      "timestamp_s": 254.215747,
+      "depth_file": "depth\\frame_000003.npz",
+      "preview_file": "preview\\frame_000003.png"
+    },
+    {
+      "frame_index": 4,
+      "frame_name": "frame_000004",
+      "timestamp_s": 254.51445,
+      "depth_file": "depth\\frame_000004.npz",
+      "preview_file": "preview\\frame_000004.png"
+    },
+    {
+      "frame_index": 5,
+      "frame_name": "frame_000005",
+      "timestamp_s": 255.012318,
+      "depth_file": "depth\\frame_000005.npz",
+      "preview_file": "preview\\frame_000005.png"
+    },
+    {
+      "frame_index": 6,
+      "frame_name": "frame_000006",
+      "timestamp_s": 255.277818,
+      "depth_file": "depth\\frame_000006.npz",
+      "preview_file": "preview\\frame_000006.png"
+    },
+    {
+      "frame_index": 7,
+      "frame_name": "frame_000007",
+      "timestamp_s": 255.609723,
+      "depth_file": "depth\\frame_000007.npz",
+      "preview_file": "preview\\frame_000007.png"
+    },
+    {
+      "frame_index": 8,
+      "frame_name": "frame_000008",
+      "timestamp_s": 256.107568,
+      "depth_file": "depth\\frame_000008.npz",
+      "preview_file": "preview\\frame_000008.png"
+    },
+    {
+      "frame_index": 9,
+      "frame_name": "frame_000009",
+      "timestamp_s": 256.57225700000004,
+      "depth_file": "depth\\frame_000009.npz",
+      "preview_file": "preview\\frame_000009.png"
+    },
+    {
+      "frame_index": 10,
+      "frame_name": "frame_000010",
+      "timestamp_s": 256.804555,
+      "depth_file": "depth\\frame_000010.npz",
+      "preview_file": "preview\\frame_000010.png"
+    },
+    {
+      "frame_index": 11,
+      "frame_name": "frame_000011",
+      "timestamp_s": 257.236019,
+      "depth_file": "depth\\frame_000011.npz",
+      "preview_file": "preview\\frame_000011.png"
+    },
+    {
+      "frame_index": 12,
+      "frame_name": "frame_000012",
+      "timestamp_s": 257.534745,
+      "depth_file": "depth\\frame_000012.npz",
+      "preview_file": "preview\\frame_000012.png"
+    },
+    {
+      "frame_index": 13,
+      "frame_name": "frame_000013",
+      "timestamp_s": 257.767066,
+      "depth_file": "depth\\frame_000013.npz",
+      "preview_file": "preview\\frame_000013.png"
+    },
+    {
+      "frame_index": 14,
+      "frame_name": "frame_000014",
+      "timestamp_s": 258.065792,
+      "depth_file": "depth\\frame_000014.npz",
+      "preview_file": "preview\\frame_000014.png"
+    },
+    {
+      "frame_index": 15,
+      "frame_name": "frame_000015",
+      "timestamp_s": 258.364517,
+      "depth_file": "depth\\frame_000015.npz",
+      "preview_file": "preview\\frame_000015.png"
+    },
+    {
+      "frame_index": 16,
+      "frame_name": "frame_000016",
+      "timestamp_s": 258.663221,
+      "depth_file": "depth\\frame_000016.npz",
+      "preview_file": "preview\\frame_000016.png"
+    },
+    {
+      "frame_index": 17,
+      "frame_name": "frame_000017",
+      "timestamp_s": 259.028307,
+      "depth_file": "depth\\frame_000017.npz",
+      "preview_file": "preview\\frame_000017.png"
+    },
+    {
+      "frame_index": 18,
+      "frame_name": "frame_000018",
+      "timestamp_s": 259.360214,
+      "depth_file": "depth\\frame_000018.npz",
+      "preview_file": "preview\\frame_000018.png"
+    },
+    {
+      "frame_index": 19,
+      "frame_name": "frame_000019",
+      "timestamp_s": 259.69212,
+      "depth_file": "depth\\frame_000019.npz",
+      "preview_file": "preview\\frame_000019.png"
+    },
+    {
+      "frame_index": 20,
+      "frame_name": "frame_000020",
+      "timestamp_s": 259.957645,
+      "depth_file": "depth\\frame_000020.npz",
+      "preview_file": "preview\\frame_000020.png"
+    },
+    {
+      "frame_index": 21,
+      "frame_name": "frame_000021",
+      "timestamp_s": 263.907245,
+      "depth_file": "depth\\frame_000021.npz",
+      "preview_file": "preview\\frame_000021.png"
+    },
+    {
+      "frame_index": 22,
+      "frame_name": "frame_000022",
+      "timestamp_s": 267.126712,
+      "depth_file": "depth\\frame_000022.npz",
+      "preview_file": "preview\\frame_000022.png"
+    },
+    {
+      "frame_index": 23,
+      "frame_name": "frame_000023",
+      "timestamp_s": 267.524982,
+      "depth_file": "depth\\frame_000023.npz",
+      "preview_file": "preview\\frame_000023.png"
+    },
+    {
+      "frame_index": 24,
+      "frame_name": "frame_000024",
+      "timestamp_s": 267.856869,
+      "depth_file": "depth\\frame_000024.npz",
+      "preview_file": "preview\\frame_000024.png"
+    },
+    {
+      "frame_index": 25,
+      "frame_name": "frame_000025",
+      "timestamp_s": 268.18878,
+      "depth_file": "depth\\frame_000025.npz",
+      "preview_file": "preview\\frame_000025.png"
+    },
+    {
+      "frame_index": 26,
+      "frame_name": "frame_000026",
+      "timestamp_s": 268.62023,
+      "depth_file": "depth\\frame_000026.npz",
+      "preview_file": "preview\\frame_000026.png"
+    },
+    {
+      "frame_index": 27,
+      "frame_name": "frame_000027",
+      "timestamp_s": 268.885759,
+      "depth_file": "depth\\frame_000027.npz",
+      "preview_file": "preview\\frame_000027.png"
+    },
+    {
+      "frame_index": 28,
+      "frame_name": "frame_000028",
+      "timestamp_s": 269.28405300000003,
+      "depth_file": "depth\\frame_000028.npz",
+      "preview_file": "preview\\frame_000028.png"
+    },
+    {
+      "frame_index": 29,
+      "frame_name": "frame_000029",
+      "timestamp_s": 269.582762,
+      "depth_file": "depth\\frame_000029.npz",
+      "preview_file": "preview\\frame_000029.png"
+    },
+    {
+      "frame_index": 30,
+      "frame_name": "frame_000030",
+      "timestamp_s": 270.21335999999997,
+      "depth_file": "depth\\frame_000030.npz",
+      "preview_file": "preview\\frame_000030.png"
+    },
+    {
+      "frame_index": 31,
+      "frame_name": "frame_000031",
+      "timestamp_s": 270.545271,
+      "depth_file": "depth\\frame_000031.npz",
+      "preview_file": "preview\\frame_000031.png"
+    },
+    {
+      "frame_index": 32,
+      "frame_name": "frame_000032",
+      "timestamp_s": 270.877183,
+      "depth_file": "depth\\frame_000032.npz",
+      "preview_file": "preview\\frame_000032.png"
+    },
+    {
+      "frame_index": 33,
+      "frame_name": "frame_000033",
+      "timestamp_s": 271.142713,
+      "depth_file": "depth\\frame_000033.npz",
+      "preview_file": "preview\\frame_000033.png"
+    },
+    {
+      "frame_index": 34,
+      "frame_name": "frame_000034",
+      "timestamp_s": 271.408196,
+      "depth_file": "depth\\frame_000034.npz",
+      "preview_file": "preview\\frame_000034.png"
+    },
+    {
+      "frame_index": 35,
+      "frame_name": "frame_000035",
+      "timestamp_s": 271.673749,
+      "depth_file": "depth\\frame_000035.npz",
+      "preview_file": "preview\\frame_000035.png"
+    },
+    {
+      "frame_index": 36,
+      "frame_name": "frame_000036",
+      "timestamp_s": 271.939256,
+      "depth_file": "depth\\frame_000036.npz",
+      "preview_file": "preview\\frame_000036.png"
+    },
+    {
+      "frame_index": 37,
+      "frame_name": "frame_000037",
+      "timestamp_s": 272.470293,
+      "depth_file": "depth\\frame_000037.npz",
+      "preview_file": "preview\\frame_000037.png"
+    },
+    {
+      "frame_index": 38,
+      "frame_name": "frame_000038",
+      "timestamp_s": 273.134096,
+      "depth_file": "depth\\frame_000038.npz",
+      "preview_file": "preview\\frame_000038.png"
+    },
+    {
+      "frame_index": 39,
+      "frame_name": "frame_000039",
+      "timestamp_s": 273.499189,
+      "depth_file": "depth\\frame_000039.npz",
+      "preview_file": "preview\\frame_000039.png"
+    },
+    {
+      "frame_index": 40,
+      "frame_name": "frame_000040",
+      "timestamp_s": 273.797923,
+      "depth_file": "depth\\frame_000040.npz",
+      "preview_file": "preview\\frame_000040.png"
+    },
+    {
+      "frame_index": 41,
+      "frame_name": "frame_000041",
+      "timestamp_s": 274.29575800000003,
+      "depth_file": "depth\\frame_000041.npz",
+      "preview_file": "preview\\frame_000041.png"
+    },
+    {
+      "frame_index": 42,
+      "frame_name": "frame_000042",
+      "timestamp_s": 274.66085200000003,
+      "depth_file": "depth\\frame_000042.npz",
+      "preview_file": "preview\\frame_000042.png"
+    },
+    {
+      "frame_index": 43,
+      "frame_name": "frame_000043",
+      "timestamp_s": 274.959563,
+      "depth_file": "depth\\frame_000043.npz",
+      "preview_file": "preview\\frame_000043.png"
+    },
+    {
+      "frame_index": 44,
+      "frame_name": "frame_000044",
+      "timestamp_s": 275.25827400000003,
+      "depth_file": "depth\\frame_000044.npz",
+      "preview_file": "preview\\frame_000044.png"
+    },
+    {
+      "frame_index": 45,
+      "frame_name": "frame_000045",
+      "timestamp_s": 275.523805,
+      "depth_file": "depth\\frame_000045.npz",
+      "preview_file": "preview\\frame_000045.png"
+    },
+    {
+      "frame_index": 46,
+      "frame_name": "frame_000046",
+      "timestamp_s": 275.789336,
+      "depth_file": "depth\\frame_000046.npz",
+      "preview_file": "preview\\frame_000046.png"
+    },
+    {
+      "frame_index": 47,
+      "frame_name": "frame_000047",
+      "timestamp_s": 276.021642,
+      "depth_file": "depth\\frame_000047.npz",
+      "preview_file": "preview\\frame_000047.png"
+    },
+    {
+      "frame_index": 48,
+      "frame_name": "frame_000048",
+      "timestamp_s": 276.38673600000004,
+      "depth_file": "depth\\frame_000048.npz",
+      "preview_file": "preview\\frame_000048.png"
+    },
+    {
+      "frame_index": 49,
+      "frame_name": "frame_000049",
+      "timestamp_s": 276.619065,
+      "depth_file": "depth\\frame_000049.npz",
+      "preview_file": "preview\\frame_000049.png"
+    },
+    {
+      "frame_index": 50,
+      "frame_name": "frame_000050",
+      "timestamp_s": 276.917799,
+      "depth_file": "depth\\frame_000050.npz",
+      "preview_file": "preview\\frame_000050.png"
+    },
+    {
+      "frame_index": 51,
+      "frame_name": "frame_000051",
+      "timestamp_s": 277.116902,
+      "depth_file": "depth\\frame_000051.npz",
+      "preview_file": "preview\\frame_000051.png"
+    },
+    {
+      "frame_index": 52,
+      "frame_name": "frame_000052",
+      "timestamp_s": 277.34925300000003,
+      "depth_file": "depth\\frame_000052.npz",
+      "preview_file": "preview\\frame_000052.png"
+    },
+    {
+      "frame_index": 53,
+      "frame_name": "frame_000053",
+      "timestamp_s": 277.548403,
+      "depth_file": "depth\\frame_000053.npz",
+      "preview_file": "preview\\frame_000053.png"
+    },
+    {
+      "frame_index": 54,
+      "frame_name": "frame_000054",
+      "timestamp_s": 277.747528,
+      "depth_file": "depth\\frame_000054.npz",
+      "preview_file": "preview\\frame_000054.png"
+    },
+    {
+      "frame_index": 55,
+      "frame_name": "frame_000055",
+      "timestamp_s": 277.880294,
+      "depth_file": "depth\\frame_000055.npz",
+      "preview_file": "preview\\frame_000055.png"
+    },
+    {
+      "frame_index": 56,
+      "frame_name": "frame_000056",
+      "timestamp_s": 278.07941999999997,
+      "depth_file": "depth\\frame_000056.npz",
+      "preview_file": "preview\\frame_000056.png"
+    },
+    {
+      "frame_index": 57,
+      "frame_name": "frame_000057",
+      "timestamp_s": 278.278569,
+      "depth_file": "depth\\frame_000057.npz",
+      "preview_file": "preview\\frame_000057.png"
+    },
+    {
+      "frame_index": 58,
+      "frame_name": "frame_000058",
+      "timestamp_s": 278.477695,
+      "depth_file": "depth\\frame_000058.npz",
+      "preview_file": "preview\\frame_000058.png"
+    },
+    {
+      "frame_index": 59,
+      "frame_name": "frame_000059",
+      "timestamp_s": 278.875993,
+      "depth_file": "depth\\frame_000059.npz",
+      "preview_file": "preview\\frame_000059.png"
+    },
+    {
+      "frame_index": 60,
+      "frame_name": "frame_000060",
+      "timestamp_s": 279.108322,
+      "depth_file": "depth\\frame_000060.npz",
+      "preview_file": "preview\\frame_000060.png"
+    },
+    {
+      "frame_index": 61,
+      "frame_name": "frame_000061",
+      "timestamp_s": 279.340652,
+      "depth_file": "depth\\frame_000061.npz",
+      "preview_file": "preview\\frame_000061.png"
+    },
+    {
+      "frame_index": 62,
+      "frame_name": "frame_000062",
+      "timestamp_s": 279.639364,
+      "depth_file": "depth\\frame_000062.npz",
+      "preview_file": "preview\\frame_000062.png"
+    },
+    {
+      "frame_index": 63,
+      "frame_name": "frame_000063",
+      "timestamp_s": 279.871717,
+      "depth_file": "depth\\frame_000063.npz",
+      "preview_file": "preview\\frame_000063.png"
+    },
+    {
+      "frame_index": 64,
+      "frame_name": "frame_000064",
+      "timestamp_s": 280.104023,
+      "depth_file": "depth\\frame_000064.npz",
+      "preview_file": "preview\\frame_000064.png"
+    },
+    {
+      "frame_index": 65,
+      "frame_name": "frame_000065",
+      "timestamp_s": 288.30199200000004,
+      "depth_file": "depth\\frame_000065.npz",
+      "preview_file": "preview\\frame_000065.png"
+    },
+    {
+      "frame_index": 66,
+      "frame_name": "frame_000066",
+      "timestamp_s": 288.5343,
+      "depth_file": "depth\\frame_000066.npz",
+      "preview_file": "preview\\frame_000066.png"
+    },
+    {
+      "frame_index": 67,
+      "frame_name": "frame_000067",
+      "timestamp_s": 288.76665399999996,
+      "depth_file": "depth\\frame_000067.npz",
+      "preview_file": "preview\\frame_000067.png"
+    },
+    {
+      "frame_index": 68,
+      "frame_name": "frame_000068",
+      "timestamp_s": 289.13173,
+      "depth_file": "depth\\frame_000068.npz",
+      "preview_file": "preview\\frame_000068.png"
+    },
+    {
+      "frame_index": 69,
+      "frame_name": "frame_000069",
+      "timestamp_s": 289.364061,
+      "depth_file": "depth\\frame_000069.npz",
+      "preview_file": "preview\\frame_000069.png"
+    },
+    {
+      "frame_index": 70,
+      "frame_name": "frame_000070",
+      "timestamp_s": 289.695956,
+      "depth_file": "depth\\frame_000070.npz",
+      "preview_file": "preview\\frame_000070.png"
+    },
+    {
+      "frame_index": 71,
+      "frame_name": "frame_000071",
+      "timestamp_s": 290.027898,
+      "depth_file": "depth\\frame_000071.npz",
+      "preview_file": "preview\\frame_000071.png"
+    },
+    {
+      "frame_index": 72,
+      "frame_name": "frame_000072",
+      "timestamp_s": 290.392974,
+      "depth_file": "depth\\frame_000072.npz",
+      "preview_file": "preview\\frame_000072.png"
+    },
+    {
+      "frame_index": 73,
+      "frame_name": "frame_000073",
+      "timestamp_s": 290.69169,
+      "depth_file": "depth\\frame_000073.npz",
+      "preview_file": "preview\\frame_000073.png"
+    },
+    {
+      "frame_index": 74,
+      "frame_name": "frame_000074",
+      "timestamp_s": 290.957201,
+      "depth_file": "depth\\frame_000074.npz",
+      "preview_file": "preview\\frame_000074.png"
+    },
+    {
+      "frame_index": 75,
+      "frame_name": "frame_000075",
+      "timestamp_s": 291.189533,
+      "depth_file": "depth\\frame_000075.npz",
+      "preview_file": "preview\\frame_000075.png"
+    },
+    {
+      "frame_index": 76,
+      "frame_name": "frame_000076",
+      "timestamp_s": 291.388661,
+      "depth_file": "depth\\frame_000076.npz",
+      "preview_file": "preview\\frame_000076.png"
+    },
+    {
+      "frame_index": 77,
+      "frame_name": "frame_000077",
+      "timestamp_s": 291.786941,
+      "depth_file": "depth\\frame_000077.npz",
+      "preview_file": "preview\\frame_000077.png"
+    },
+    {
+      "frame_index": 78,
+      "frame_name": "frame_000078",
+      "timestamp_s": 292.351191,
+      "depth_file": "depth\\frame_000078.npz",
+      "preview_file": "preview\\frame_000078.png"
+    },
+    {
+      "frame_index": 79,
+      "frame_name": "frame_000079",
+      "timestamp_s": 292.550342,
+      "depth_file": "depth\\frame_000079.npz",
+      "preview_file": "preview\\frame_000079.png"
+    },
+    {
+      "frame_index": 80,
+      "frame_name": "frame_000080",
+      "timestamp_s": 292.815831,
+      "depth_file": "depth\\frame_000080.npz",
+      "preview_file": "preview\\frame_000080.png"
+    },
+    {
+      "frame_index": 81,
+      "frame_name": "frame_000081",
+      "timestamp_s": 293.081366,
+      "depth_file": "depth\\frame_000081.npz",
+      "preview_file": "preview\\frame_000081.png"
+    },
+    {
+      "frame_index": 82,
+      "frame_name": "frame_000082",
+      "timestamp_s": 293.612415,
+      "depth_file": "depth\\frame_000082.npz",
+      "preview_file": "preview\\frame_000082.png"
+    },
+    {
+      "frame_index": 83,
+      "frame_name": "frame_000083",
+      "timestamp_s": 293.84474700000004,
+      "depth_file": "depth\\frame_000083.npz",
+      "preview_file": "preview\\frame_000083.png"
+    },
+    {
+      "frame_index": 84,
+      "frame_name": "frame_000084",
+      "timestamp_s": 294.11025900000004,
+      "depth_file": "depth\\frame_000084.npz",
+      "preview_file": "preview\\frame_000084.png"
+    },
+    {
+      "frame_index": 85,
+      "frame_name": "frame_000085",
+      "timestamp_s": 294.375795,
+      "depth_file": "depth\\frame_000085.npz",
+      "preview_file": "preview\\frame_000085.png"
+    },
+    {
+      "frame_index": 86,
+      "frame_name": "frame_000086",
+      "timestamp_s": 294.574924,
+      "depth_file": "depth\\frame_000086.npz",
+      "preview_file": "preview\\frame_000086.png"
+    },
+    {
+      "frame_index": 87,
+      "frame_name": "frame_000087",
+      "timestamp_s": 294.807257,
+      "depth_file": "depth\\frame_000087.npz",
+      "preview_file": "preview\\frame_000087.png"
+    },
+    {
+      "frame_index": 88,
+      "frame_name": "frame_000088",
+      "timestamp_s": 295.039589,
+      "depth_file": "depth\\frame_000088.npz",
+      "preview_file": "preview\\frame_000088.png"
+    },
+    {
+      "frame_index": 89,
+      "frame_name": "frame_000089",
+      "timestamp_s": 295.238719,
+      "depth_file": "depth\\frame_000089.npz",
+      "preview_file": "preview\\frame_000089.png"
+    },
+    {
+      "frame_index": 90,
+      "frame_name": "frame_000090",
+      "timestamp_s": 295.471051,
+      "depth_file": "depth\\frame_000090.npz",
+      "preview_file": "preview\\frame_000090.png"
+    },
+    {
+      "frame_index": 91,
+      "frame_name": "frame_000091",
+      "timestamp_s": 295.736587,
+      "depth_file": "depth\\frame_000091.npz",
+      "preview_file": "preview\\frame_000091.png"
+    },
+    {
+      "frame_index": 92,
+      "frame_name": "frame_000092",
+      "timestamp_s": 296.56630700000005,
+      "depth_file": "depth\\frame_000092.npz",
+      "preview_file": "preview\\frame_000092.png"
+    },
+    {
+      "frame_index": 93,
+      "frame_name": "frame_000093",
+      "timestamp_s": 296.931408,
+      "depth_file": "depth\\frame_000093.npz",
+      "preview_file": "preview\\frame_000093.png"
+    },
+    {
+      "frame_index": 94,
+      "frame_name": "frame_000094",
+      "timestamp_s": 297.230126,
+      "depth_file": "depth\\frame_000094.npz",
+      "preview_file": "preview\\frame_000094.png"
+    },
+    {
+      "frame_index": 95,
+      "frame_name": "frame_000095",
+      "timestamp_s": 297.49563900000004,
+      "depth_file": "depth\\frame_000095.npz",
+      "preview_file": "preview\\frame_000095.png"
+    },
+    {
+      "frame_index": 96,
+      "frame_name": "frame_000096",
+      "timestamp_s": 297.82756,
+      "depth_file": "depth\\frame_000096.npz",
+      "preview_file": "preview\\frame_000096.png"
+    },
+    {
+      "frame_index": 97,
+      "frame_name": "frame_000097",
+      "timestamp_s": 298.093074,
+      "depth_file": "depth\\frame_000097.npz",
+      "preview_file": "preview\\frame_000097.png"
+    },
+    {
+      "frame_index": 98,
+      "frame_name": "frame_000098",
+      "timestamp_s": 298.823253,
+      "depth_file": "depth\\frame_000098.npz",
+      "preview_file": "preview\\frame_000098.png"
+    },
+    {
+      "frame_index": 99,
+      "frame_name": "frame_000099",
+      "timestamp_s": 299.055587,
+      "depth_file": "depth\\frame_000099.npz",
+      "preview_file": "preview\\frame_000099.png"
+    },
+    {
+      "frame_index": 100,
+      "frame_name": "frame_000100",
+      "timestamp_s": 299.287919,
+      "depth_file": "depth\\frame_000100.npz",
+      "preview_file": "preview\\frame_000100.png"
+    },
+    {
+      "frame_index": 101,
+      "frame_name": "frame_000101",
+      "timestamp_s": 299.52025199999997,
+      "depth_file": "depth\\frame_000101.npz",
+      "preview_file": "preview\\frame_000101.png"
+    },
+    {
+      "frame_index": 102,
+      "frame_name": "frame_000102",
+      "timestamp_s": 300.150868,
+      "depth_file": "depth\\frame_000102.npz",
+      "preview_file": "preview\\frame_000102.png"
+    },
+    {
+      "frame_index": 103,
+      "frame_name": "frame_000103",
+      "timestamp_s": 300.416382,
+      "depth_file": "depth\\frame_000103.npz",
+      "preview_file": "preview\\frame_000103.png"
+    },
+    {
+      "frame_index": 104,
+      "frame_name": "frame_000104",
+      "timestamp_s": 300.61551199999997,
+      "depth_file": "depth\\frame_000104.npz",
+      "preview_file": "preview\\frame_000104.png"
+    },
+    {
+      "frame_index": 105,
+      "frame_name": "frame_000105",
+      "timestamp_s": 300.881049,
+      "depth_file": "depth\\frame_000105.npz",
+      "preview_file": "preview\\frame_000105.png"
+    },
+    {
+      "frame_index": 106,
+      "frame_name": "frame_000106",
+      "timestamp_s": 301.146563,
+      "depth_file": "depth\\frame_000106.npz",
+      "preview_file": "preview\\frame_000106.png"
+    },
+    {
+      "frame_index": 107,
+      "frame_name": "frame_000107",
+      "timestamp_s": 301.478462,
+      "depth_file": "depth\\frame_000107.npz",
+      "preview_file": "preview\\frame_000107.png"
+    },
+    {
+      "frame_index": 108,
+      "frame_name": "frame_000108",
+      "timestamp_s": 301.74397700000003,
+      "depth_file": "depth\\frame_000108.npz",
+      "preview_file": "preview\\frame_000108.png"
+    },
+    {
+      "frame_index": 109,
+      "frame_name": "frame_000109",
+      "timestamp_s": 302.042696,
+      "depth_file": "depth\\frame_000109.npz",
+      "preview_file": "preview\\frame_000109.png"
+    },
+    {
+      "frame_index": 110,
+      "frame_name": "frame_000110",
+      "timestamp_s": 302.27503,
+      "depth_file": "depth\\frame_000110.npz",
+      "preview_file": "preview\\frame_000110.png"
+    },
+    {
+      "frame_index": 111,
+      "frame_name": "frame_000111",
+      "timestamp_s": 302.540546,
+      "depth_file": "depth\\frame_000111.npz",
+      "preview_file": "preview\\frame_000111.png"
+    },
+    {
+      "frame_index": 112,
+      "frame_name": "frame_000112",
+      "timestamp_s": 302.739676,
+      "depth_file": "depth\\frame_000112.npz",
+      "preview_file": "preview\\frame_000112.png"
+    },
+    {
+      "frame_index": 113,
+      "frame_name": "frame_000113",
+      "timestamp_s": 303.00521399999997,
+      "depth_file": "depth\\frame_000113.npz",
+      "preview_file": "preview\\frame_000113.png"
+    },
+    {
+      "frame_index": 114,
+      "frame_name": "frame_000114",
+      "timestamp_s": 303.237549,
+      "depth_file": "depth\\frame_000114.npz",
+      "preview_file": "preview\\frame_000114.png"
+    },
+    {
+      "frame_index": 115,
+      "frame_name": "frame_000115",
+      "timestamp_s": 303.503042,
+      "depth_file": "depth\\frame_000115.npz",
+      "preview_file": "preview\\frame_000115.png"
+    },
+    {
+      "frame_index": 116,
+      "frame_name": "frame_000116",
+      "timestamp_s": 303.73539900000003,
+      "depth_file": "depth\\frame_000116.npz",
+      "preview_file": "preview\\frame_000116.png"
+    },
+    {
+      "frame_index": 117,
+      "frame_name": "frame_000117",
+      "timestamp_s": 303.901349,
+      "depth_file": "depth\\frame_000117.npz",
+      "preview_file": "preview\\frame_000117.png"
+    },
+    {
+      "frame_index": 118,
+      "frame_name": "frame_000118",
+      "timestamp_s": 304.100457,
+      "depth_file": "depth\\frame_000118.npz",
+      "preview_file": "preview\\frame_000118.png"
+    },
+    {
+      "frame_index": 119,
+      "frame_name": "frame_000119",
+      "timestamp_s": 304.3992,
+      "depth_file": "depth\\frame_000119.npz",
+      "preview_file": "preview\\frame_000119.png"
+    },
+    {
+      "frame_index": 120,
+      "frame_name": "frame_000120",
+      "timestamp_s": 304.59833100000003,
+      "depth_file": "depth\\frame_000120.npz",
+      "preview_file": "preview\\frame_000120.png"
+    },
+    {
+      "frame_index": 121,
+      "frame_name": "frame_000121",
+      "timestamp_s": 304.830667,
+      "depth_file": "depth\\frame_000121.npz",
+      "preview_file": "preview\\frame_000121.png"
+    },
+    {
+      "frame_index": 122,
+      "frame_name": "frame_000122",
+      "timestamp_s": 305.19574800000004,
+      "depth_file": "depth\\frame_000122.npz",
+      "preview_file": "preview\\frame_000122.png"
+    },
+    {
+      "frame_index": 123,
+      "frame_name": "frame_000123",
+      "timestamp_s": 305.42806,
+      "depth_file": "depth\\frame_000123.npz",
+      "preview_file": "preview\\frame_000123.png"
+    },
+    {
+      "frame_index": 124,
+      "frame_name": "frame_000124",
+      "timestamp_s": 305.79318800000004,
+      "depth_file": "depth\\frame_000124.npz",
+      "preview_file": "preview\\frame_000124.png"
+    },
+    {
+      "frame_index": 125,
+      "frame_name": "frame_000125",
+      "timestamp_s": 306.091886,
+      "depth_file": "depth\\frame_000125.npz",
+      "preview_file": "preview\\frame_000125.png"
+    },
+    {
+      "frame_index": 126,
+      "frame_name": "frame_000126",
+      "timestamp_s": 306.423787,
+      "depth_file": "depth\\frame_000126.npz",
+      "preview_file": "preview\\frame_000126.png"
+    },
+    {
+      "frame_index": 127,
+      "frame_name": "frame_000127",
+      "timestamp_s": 306.78886900000003,
+      "depth_file": "depth\\frame_000127.npz",
+      "preview_file": "preview\\frame_000127.png"
+    },
+    {
+      "frame_index": 128,
+      "frame_name": "frame_000128",
+      "timestamp_s": 307.021205,
+      "depth_file": "depth\\frame_000128.npz",
+      "preview_file": "preview\\frame_000128.png"
+    },
+    {
+      "frame_index": 129,
+      "frame_name": "frame_000129",
+      "timestamp_s": 307.286722,
+      "depth_file": "depth\\frame_000129.npz",
+      "preview_file": "preview\\frame_000129.png"
+    },
+    {
+      "frame_index": 130,
+      "frame_name": "frame_000130",
+      "timestamp_s": 307.585442,
+      "depth_file": "depth\\frame_000130.npz",
+      "preview_file": "preview\\frame_000130.png"
+    },
+    {
+      "frame_index": 131,
+      "frame_name": "frame_000131",
+      "timestamp_s": 307.85095900000005,
+      "depth_file": "depth\\frame_000131.npz",
+      "preview_file": "preview\\frame_000131.png"
+    },
+    {
+      "frame_index": 132,
+      "frame_name": "frame_000132",
+      "timestamp_s": 308.382016,
+      "depth_file": "depth\\frame_000132.npz",
+      "preview_file": "preview\\frame_000132.png"
+    },
+    {
+      "frame_index": 133,
+      "frame_name": "frame_000133",
+      "timestamp_s": 308.61432900000005,
+      "depth_file": "depth\\frame_000133.npz",
+      "preview_file": "preview\\frame_000133.png"
+    },
+    {
+      "frame_index": 134,
+      "frame_name": "frame_000134",
+      "timestamp_s": 308.87987,
+      "depth_file": "depth\\frame_000134.npz",
+      "preview_file": "preview\\frame_000134.png"
+    },
+    {
+      "frame_index": 135,
+      "frame_name": "frame_000135",
+      "timestamp_s": 309.14538699999997,
+      "depth_file": "depth\\frame_000135.npz",
+      "preview_file": "preview\\frame_000135.png"
+    },
+    {
+      "frame_index": 136,
+      "frame_name": "frame_000136",
+      "timestamp_s": 309.34452000000005,
+      "depth_file": "depth\\frame_000136.npz",
+      "preview_file": "preview\\frame_000136.png"
+    },
+    {
+      "frame_index": 137,
+      "frame_name": "frame_000137",
+      "timestamp_s": 309.543675,
+      "depth_file": "depth\\frame_000137.npz",
+      "preview_file": "preview\\frame_000137.png"
+    },
+    {
+      "frame_index": 138,
+      "frame_name": "frame_000138",
+      "timestamp_s": 310.107891,
+      "depth_file": "depth\\frame_000138.npz",
+      "preview_file": "preview\\frame_000138.png"
+    },
+    {
+      "frame_index": 139,
+      "frame_name": "frame_000139",
+      "timestamp_s": 310.738493,
+      "depth_file": "depth\\frame_000139.npz",
+      "preview_file": "preview\\frame_000139.png"
+    },
+    {
+      "frame_index": 140,
+      "frame_name": "frame_000140",
+      "timestamp_s": 310.93762699999996,
+      "depth_file": "depth\\frame_000140.npz",
+      "preview_file": "preview\\frame_000140.png"
+    },
+    {
+      "frame_index": 141,
+      "frame_name": "frame_000141",
+      "timestamp_s": 311.16998600000005,
+      "depth_file": "depth\\frame_000141.npz",
+      "preview_file": "preview\\frame_000141.png"
+    },
+    {
+      "frame_index": 142,
+      "frame_name": "frame_000142",
+      "timestamp_s": 311.369119,
+      "depth_file": "depth\\frame_000142.npz",
+      "preview_file": "preview\\frame_000142.png"
+    },
+    {
+      "frame_index": 143,
+      "frame_name": "frame_000143",
+      "timestamp_s": 311.601456,
+      "depth_file": "depth\\frame_000143.npz",
+      "preview_file": "preview\\frame_000143.png"
+    },
+    {
+      "frame_index": 144,
+      "frame_name": "frame_000144",
+      "timestamp_s": 311.800589,
+      "depth_file": "depth\\frame_000144.npz",
+      "preview_file": "preview\\frame_000144.png"
+    }
+  ],
+  "ended_unix_s": 1778839800.0494819,
+  "num_saved_frames": 145
+}

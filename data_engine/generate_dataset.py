@@ -300,10 +300,15 @@ def _seed_for_sample(base_seed: int, sample_index: int, attempt: int = 0) -> int
     return int((base_seed * 1000003 + sample_index * 9176 + attempt * 1315423911) % (2**63 - 1))
 
 
-def _load_background_cache(scene_cfg: dict[str, Any], background_paths: list[str], max_backgrounds_in_ram: int) -> None:
-    global _WORKER_SCENE_CFG, _WORKER_BG_DEPTHS, _WORKER_BG_IDS
-
+def _init_worker_scene(scene_cfg: dict[str, Any]) -> None:
+    global _WORKER_SCENE_CFG
     _WORKER_SCENE_CFG = scene_cfg
+
+
+def _load_background_cache(scene_cfg: dict[str, Any], background_paths: list[str], max_backgrounds_in_ram: int) -> None:
+    global _WORKER_BG_DEPTHS, _WORKER_BG_IDS
+
+    _init_worker_scene(scene_cfg)
     paths = list(background_paths)
     if max_backgrounds_in_ram > 0:
         paths = paths[: max_backgrounds_in_ram]
@@ -786,6 +791,7 @@ def build_dataset(
         stl_chunk_size = 1
 
     background_weights = _sample_background_weights(scene_cfg)
+    _init_worker_scene(scene_cfg)
     if background_weights["real"] > 0.0:
         _load_background_cache(scene_cfg, background_paths, max_backgrounds_in_ram)
     else:
